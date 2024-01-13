@@ -53,11 +53,15 @@ pub fn sparql_literal_to_polars_literal_value(lit: &Literal) -> LiteralValue {
     } else if datatype == xsd::DATE_TIME {
         let dt_without_tz = value.parse::<NaiveDateTime>();
         if let Ok(dt) = dt_without_tz {
-            LiteralValue::DateTime(dt.timestamp(), TimeUnit::Nanoseconds, None)
+            LiteralValue::DateTime(dt.timestamp_nanos(), TimeUnit::Nanoseconds, None)
         } else {
             let dt_without_tz = value.parse::<DateTime<Utc>>();
             if let Ok(dt) = dt_without_tz {
-                LiteralValue::DateTime(dt.naive_utc().timestamp(), TimeUnit::Nanoseconds, None)
+                LiteralValue::DateTime(
+                    dt.naive_utc().timestamp_nanos(),
+                    TimeUnit::Nanoseconds,
+                    None,
+                )
             } else {
                 panic!("Could not parse datetime: {}", value);
             }
