@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use crate::{literal_iri_to_namednode, RDFNodeType, LANG_STRING_LANG_FIELD, LANG_STRING_VALUE_FIELD, literal_blanknode_to_blanknode};
 use oxrdf::vocab::{rdf, xsd};
-use oxrdf::{Literal, Variable};
+use oxrdf::{Literal, NamedNodeRef, Variable};
 use polars::export::rayon::iter::{ParallelIterator};
 use polars_core::frame::DataFrame;
 use polars_core::prelude::{DataType};
@@ -170,5 +170,28 @@ pub fn df_as_result(df: DataFrame, dtypes: &HashMap<String, RDFNodeType>) -> Que
     QuerySolutions {
         variables,
         solutions: solns,
+    }
+}
+
+pub fn primitive_polars_type_to_literal_type(data_type: &DataType) -> NamedNodeRef {
+    match data_type {
+        DataType::Boolean => xsd::BOOLEAN,
+        DataType::Int8 => xsd::BYTE,
+        DataType::Int16 => xsd::SHORT,
+        DataType::UInt8 => xsd::UNSIGNED_BYTE,
+        DataType::UInt16 => xsd::UNSIGNED_SHORT,
+        DataType::UInt32 => xsd::UNSIGNED_INT,
+        DataType::UInt64 => xsd::UNSIGNED_LONG,
+        DataType::Int32 => xsd::INT,
+        DataType::Int64 => xsd::LONG,
+        DataType::Float32 => xsd::FLOAT,
+        DataType::Float64 => xsd::DOUBLE,
+        DataType::Utf8 => xsd::STRING,
+        DataType::Date => xsd::DATE,
+        DataType::Datetime(_, Some(_)) => xsd::DATE_TIME_STAMP,
+        DataType::Datetime(_, None) => xsd::DATE_TIME,
+        DataType::Duration(_) => xsd::DURATION,
+        DataType::Categorical(_) => xsd::STRING,
+        _ => {todo!("{}", data_type)}
     }
 }
