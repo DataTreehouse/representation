@@ -173,25 +173,26 @@ pub fn df_as_result(df: DataFrame, dtypes: &HashMap<String, RDFNodeType>) -> Que
     }
 }
 
-pub fn primitive_polars_type_to_literal_type(data_type: &DataType) -> NamedNodeRef {
+
+pub fn primitive_polars_type_to_literal_type(data_type: &DataType) -> Option<NamedNodeRef> {
     match data_type {
-        DataType::Boolean => xsd::BOOLEAN,
-        DataType::Int8 => xsd::BYTE,
-        DataType::Int16 => xsd::SHORT,
-        DataType::UInt8 => xsd::UNSIGNED_BYTE,
-        DataType::UInt16 => xsd::UNSIGNED_SHORT,
-        DataType::UInt32 => xsd::UNSIGNED_INT,
-        DataType::UInt64 => xsd::UNSIGNED_LONG,
-        DataType::Int32 => xsd::INT,
-        DataType::Int64 => xsd::LONG,
-        DataType::Float32 => xsd::FLOAT,
-        DataType::Float64 => xsd::DOUBLE,
-        DataType::Utf8 => xsd::STRING,
-        DataType::Date => xsd::DATE,
-        DataType::Datetime(_, Some(_)) => xsd::DATE_TIME_STAMP,
-        DataType::Datetime(_, None) => xsd::DATE_TIME,
-        DataType::Duration(_) => xsd::DURATION,
-        DataType::Categorical(_) => xsd::STRING,
-        _ => {todo!("{}", data_type)}
+        DataType::Boolean => Some(xsd::BOOLEAN),
+        DataType::Int8 => Some(xsd::BYTE),
+        DataType::Int16 => Some(xsd::SHORT),
+        DataType::UInt8 => Some(xsd::UNSIGNED_BYTE),
+        DataType::UInt16 => Some(xsd::UNSIGNED_SHORT),
+        DataType::UInt32 => Some(xsd::UNSIGNED_INT),
+        DataType::UInt64 => Some(xsd::UNSIGNED_LONG),
+        DataType::Int32 => Some(xsd::INT),
+        DataType::Int64 => Some(xsd::LONG),
+        DataType::Float32 => Some(xsd::FLOAT),
+        DataType::Float64 => Some(xsd::DOUBLE),
+        DataType::Utf8 => Some(xsd::STRING),
+        DataType::Date => Some(xsd::DATE),
+        DataType::Datetime(_, Some(_)) => Some(xsd::DATE_TIME_STAMP),
+        DataType::Datetime(_, None) => Some(xsd::DATE_TIME),
+        DataType::Duration(_) => Some(xsd::DURATION),
+        DataType::Categorical(_) => Some(xsd::STRING),
+        _ => {None}
     }
 }
