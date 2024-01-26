@@ -2,10 +2,17 @@ use oxrdf::vocab::xsd;
 use polars::prelude::LazyFrame;
 use crate::RDFNodeType;
 use std::collections::{HashMap};
+use polars_core::frame::DataFrame;
 
 #[derive(Clone)]
 pub struct SolutionMappings {
     pub mappings: LazyFrame,
+    pub rdf_node_types: HashMap<String, RDFNodeType>,
+}
+
+#[derive(Clone, Debug)]
+pub struct EagerSolutionMappings {
+    pub mappings: DataFrame,
     pub rdf_node_types: HashMap<String, RDFNodeType>,
 }
 
