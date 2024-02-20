@@ -6,7 +6,7 @@ use polars::export::rayon::iter::{ParallelIterator};
 use polars_core::frame::DataFrame;
 use polars_core::prelude::{DataType};
 use spargebra::term::Term;
-use crate::multitype::{MULTI_BLANK_DT, MULTI_DT_COL, MULTI_IRI_DT, MULTI_LANG_COL, MULTI_VALUE_COL};
+use crate::multitype::{MULTI_BLANK_DT, MULTI_IRI_DT};
 
 //From sparesults, need public fields.
 #[derive(Debug)]

@@ -18,7 +18,7 @@ pub enum RepresentationError {
     InvalidLiteralError(String),
 }
 
-pub const LANG_STRING_VALUE_FIELD: &str = "v";
+pub const LANG_STRING_VALUE_FIELD: &str = "<http://www.w3.org/1999/02/22-rdf-syntax-ns#langString>";
 pub const LANG_STRING_LANG_FIELD: &str = "l";
 
 #[derive(PartialEq, Clone)]
@@ -35,7 +35,35 @@ pub enum RDFNodeType {
     BlankNode,
     Literal(NamedNode),
     None,
-    MultiType,
+    MultiType(Vec<BaseRDFNodeType>),
+}
+
+#[derive(Debug, Clone, Ord, PartialEq, Eq, Hash)]
+pub enum BaseRDFNodeType {
+    IRI,
+    BlankNode,
+    Literal(NamedNode),
+    None,
+}
+
+impl BaseRDFNodeType {
+    pub fn from_rdf_node_type(r:&RDFNodeType) -> BaseRDFNodeType {
+        match r {
+            RDFNodeType::IRI => {BaseRDFNodeType::IRI}
+            RDFNodeType::BlankNode => {BaseRDFNodeType::BlankNode}
+            RDFNodeType::Literal(l) => {BaseRDFNodeType::Literal(l.clone())}
+            RDFNodeType::None => {BaseRDFNodeType::None}
+            RDFNodeType::MultiType(_) => {panic!()}
+        }
+    }
+
+    pub fn is_lang_string(&self) -> bool {
+        if let RDFNodeType::Literal(l) = self {
+            l.as_ref() == rdf::LANG_STRING
+        } else {
+            false
+        }
+    }
 }
 
 impl Display for RDFNodeType {
@@ -78,6 +106,14 @@ impl RDFNodeType {
             self.clone()
         } else {
             RDFNodeType::MultiType
+        }
+    }
+
+    pub fn is_lang_string(&self) -> bool {
+        if let RDFNodeType::Literal(l) = self {
+            l.as_ref() == rdf::LANG_STRING
+        } else {
+            false
         }
     }
 
