@@ -22,9 +22,21 @@ pub fn sparql_literal_to_any_value<'a>(
         } else if datatype == xsd::UNSIGNED_INT {
             let u = u32::from_str(value).expect("Integer parsing error");
             AnyValue::from(u)
-        } else if datatype == xsd::UNSIGNED_LONG || datatype == xsd::NON_NEGATIVE_INTEGER {
+        } else if datatype == xsd::UNSIGNED_BYTE {
+            let u = u8::from_str(value).expect("Integer parsing error");
+            AnyValue::from(u)
+        } else if datatype == xsd::UNSIGNED_SHORT {
+            let u = u16::from_str(value).expect("Integer parsing error");
+            AnyValue::from(u)
+        }else if datatype == xsd::UNSIGNED_LONG || datatype == xsd::NON_NEGATIVE_INTEGER {
             let u = u64::from_str(value).expect("Integer parsing error");
             AnyValue::from(u)
+        } else if datatype == xsd::BYTE  {
+            let i = i8::from_str(value).expect("Integer parsing error");
+            AnyValue::from(i)
+        } else if datatype == xsd::SHORT {
+            let i = i16::from_str(value).expect("Integer parsing error");
+            AnyValue::from(i)
         } else if datatype == xsd::INTEGER || datatype == xsd::LONG {
             let i = i64::from_str(value).expect("Integer parsing error");
             AnyValue::from(i)
