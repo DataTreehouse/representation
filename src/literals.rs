@@ -17,6 +17,8 @@ pub fn sparql_literal_to_any_value<'a>(
         let datatype = *datatype;
         let literal_value = if datatype == xsd::STRING {
             AnyValue::Utf8Owned(value.into())
+        } else if datatype == xsd::ANY_URI {
+            AnyValue::Utf8Owned(value.into())
         } else if datatype == xsd::UNSIGNED_INT {
             let u = u32::from_str(value).expect("Integer parsing error");
             AnyValue::from(u)
