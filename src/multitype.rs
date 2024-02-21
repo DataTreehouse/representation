@@ -281,7 +281,7 @@ pub fn known_convert_lf_multicol_to_single(
     dt: &BaseRDFNodeType,
 ) -> LazyFrame {
     if dt.is_lang_string() {
-        lf = lf.with_columns(
+        lf = lf.with_column(
             as_struct(vec![
                 col(c).struct_().field_by_name(LANG_STRING_VALUE_FIELD),
                 col(c).struct_().field_by_name(LANG_STRING_LANG_FIELD),
@@ -354,75 +354,76 @@ pub fn lf_destruct(lf: &LazyFrame) -> DataFrame {
     // DataFrame::new(series_vec).unwrap()
 }
 
-pub fn join_workaround(
-    mut left_mappings: LazyFrame,
-    left_datatypes: &HashMap<String, RDFNodeType>,
-    mut right_mappings: LazyFrame,
-    right_datatypes: &HashMap<String, RDFNodeType>,
-    how: JoinArgs,
-) -> LazyFrame {
-    let mut multi_cols = vec![];
-    let mut join_cols = vec![];
-    for (k, dt) in left_datatypes {
-        if right_datatypes.contains_key(k) {
-            if let RDFNodeType::MultiType(left_types) = dt {
-                let suffix = uuid::Uuid::new_v4().to_string();
-                left_mappings = split_multi_col(left_mappings, k, &col_value, &col_lang, &col_dt);
-                right_mappings = split_multi_col(right_mappings, k, &col_value, &col_lang, &col_dt);
-
-                join_cols.push(col_value.clone());
-                join_cols.push(col_lang.clone());
-                join_cols.push(col_dt.clone());
-
-                multi_cols.push((k, col_value, col_lang, col_dt));
-            } else {
-                join_cols.push(k.to_string());
-            }
-        }
-    }
-    let join_col_expr: Vec<_> = join_cols.into_iter().map(|x| col(&x)).collect();
-    let mut joined = left_mappings.join(right_mappings, &join_col_expr, &join_col_expr, how);
-    for (k, v, lang, dt) in multi_cols {
-        joined = combine_multi_col(joined, k, &v, &lang, &dt);
-    }
-    joined
-}
-
-fn split_multi_col(
-    lf: LazyFrame,
-    k: &str,
-    col_value: &str,
-    col_lang: &str,
-    col_dt: &str,
-) -> LazyFrame {
-    lf.with_columns([
-        col(k)
-            .struct_()
-            .field_by_name(MULTI_VALUE_COL)
-            .alias(col_value),
-        col(k)
-            .struct_()
-            .field_by_name(MULTI_LANG_COL)
-            .alias(col_lang),
-        col(k).struct_().field_by_name(MULTI_DT_COL).alias(col_dt),
-    ])
-    .drop_columns(vec![k])
-}
-
-fn combine_multi_col(
-    lf: LazyFrame,
-    k: &str,
-    col_value: &str,
-    col_lang: &str,
-    col_dt: &str,
-) -> LazyFrame {
-    lf.with_column(
-        as_struct(vec![
-            col(col_value).alias(MULTI_VALUE_COL),
-            col(col_dt).alias(MULTI_DT_COL),
-            col(col_lang).alias(MULTI_LANG_COL),
-        ])
-        .alias(k),
-    )
-    .drop_columns(vec![col_value, col_lang, col_dt])
-}
+// pub fn join_workaround(
+//     mut left_mappings: LazyFrame,
+//     left_datatypes: &HashMap<String, RDFNodeType>,
+//     mut right_mappings: LazyFrame,
+//     right_datatypes: &HashMap<String, RDFNodeType>,
+//     how: JoinArgs,
+// ) -> LazyFrame {
+//     let mut multi_cols = vec![];
+//     let mut join_cols = vec![];
+//     for (k, dt) in left_datatypes {
+//         if right_datatypes.contains_key(k) {
+//             if let RDFNodeType::MultiType(left_types) = dt {
+//                 let left_suffix = uuid::Uuid::new_v4().to_string();
+//                 let all_left_cols = all_multi_and_is_cols(left_types);
+//                 left_mappings = split_multi_col(left_mappings, k, &all_left_cols, &suffix);
+//                 right_mappings = split_multi_col(right_mappings, k, &col_value, &col_lang, &col_dt);
+//
+//                 join_cols.push(col_value.clone());
+//                 join_cols.push(col_lang.clone());
+//                 join_cols.push(col_dt.clone());
+//
+//                 multi_cols.push((k, col_value, col_lang, col_dt));
+//             } else {
+//                 join_cols.push(k.to_string());
+//             }
+//         }
+//     }
+//     let join_col_expr: Vec<_> = join_cols.into_iter().map(|x| col(&x)).collect();
+//     let mut joined = left_mappings.join(right_mappings, &join_col_expr, &join_col_expr, how);
+//     for (k, v, lang, dt) in multi_cols {
+//         joined = combine_multi_col(joined, k, &v, &lang, &dt);
+//     }
+//     joined
+// }
+//
+// fn split_multi_col(
+//     lf: LazyFrame,
+//     k: &str,
+//     col_value: &str,
+//     col_lang: &str,
+//     col_dt: &str,
+// ) -> LazyFrame {
+//     lf.with_columns([
+//         col(k)
+//             .struct_()
+//             .field_by_name(MULTI_VALUE_COL)
+//             .alias(col_value),
+//         col(k)
+//             .struct_()
+//             .field_by_name(MULTI_LANG_COL)
+//             .alias(col_lang),
+//         col(k).struct_().field_by_name(MULTI_DT_COL).alias(col_dt),
+//     ])
+//     .drop_columns(vec![k])
+// }
+//
+// fn combine_multi_col(
+//     lf: LazyFrame,
+//     k: &str,
+//     col_value: &str,
+//     col_lang: &str,
+//     col_dt: &str,
+// ) -> LazyFrame {
+//     lf.with_column(
+//         as_struct(vec![
+//             col(col_value).alias(MULTI_VALUE_COL),
+//             col(col_dt).alias(MULTI_DT_COL),
+//             col(col_lang).alias(MULTI_LANG_COL),
+//         ])
+//         .alias(k),
+//     )
+//     .drop_columns(vec![col_value, col_lang, col_dt])
+// }
