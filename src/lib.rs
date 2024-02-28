@@ -21,6 +21,11 @@ pub enum RepresentationError {
 pub const LANG_STRING_VALUE_FIELD: &str = "<http://www.w3.org/1999/02/22-rdf-syntax-ns#langString>";
 pub const LANG_STRING_LANG_FIELD: &str = "l";
 
+const RDF_NODE_TYPE_IRI:&str = "IRI";
+const RDF_NODE_TYPE_BLANK_NODE:&str = "Blank";
+const RDF_NODE_TYPE_NONE:&str = "None";
+
+
 #[derive(PartialEq, Clone)]
 pub enum TripleType {
     ObjectProperty,
@@ -38,7 +43,7 @@ pub enum RDFNodeType {
     MultiType(Vec<BaseRDFNodeType>),
 }
 
-#[derive(Debug, Clone, Ord, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Ord, PartialOrd, PartialEq, Eq, Hash)]
 pub enum BaseRDFNodeType {
     IRI,
     BlankNode,
@@ -58,10 +63,38 @@ impl BaseRDFNodeType {
     }
 
     pub fn is_lang_string(&self) -> bool {
-        if let RDFNodeType::Literal(l) = self {
+        if let BaseRDFNodeType::Literal(l) = self {
             l.as_ref() == rdf::LANG_STRING
         } else {
             false
+        }
+    }
+
+    pub fn as_rdf_node_type(&self) -> RDFNodeType {
+        match self {
+            BaseRDFNodeType::IRI => {RDFNodeType::IRI}
+            BaseRDFNodeType::BlankNode => {RDFNodeType::BlankNode}
+            BaseRDFNodeType::Literal(l) => {RDFNodeType::Literal(l.clone())}
+            BaseRDFNodeType::None => {RDFNodeType::None}
+        }
+    }
+}
+
+impl Display for BaseRDFNodeType {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BaseRDFNodeType::IRI => {
+                write!(f, "{RDF_NODE_TYPE_IRI}")
+            }
+            BaseRDFNodeType::BlankNode => {
+                write!(f, "{RDF_NODE_TYPE_BLANK_NODE}")
+            }
+            BaseRDFNodeType::Literal(l) => {
+                write!(f, "{}", l)
+            }
+            BaseRDFNodeType::None => {
+                write!(f, "{RDF_NODE_TYPE_NONE}")
+            }
         }
     }
 }
@@ -70,19 +103,20 @@ impl Display for RDFNodeType {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             RDFNodeType::IRI => {
-                write!(f, "IRI")
+                write!(f, "{RDF_NODE_TYPE_IRI}")
             }
             RDFNodeType::BlankNode => {
-                write!(f, "Blank")
+                write!(f, "{RDF_NODE_TYPE_BLANK_NODE}")
             }
             RDFNodeType::Literal(l) => {
                 write!(f, "{}", l)
             }
             RDFNodeType::None => {
-                write!(f, "None")
+                write!(f, "{RDF_NODE_TYPE_NONE}")
             }
-            RDFNodeType::MultiType => {
-                write!(f, "MultiType")
+            RDFNodeType::MultiType(types) => {
+                let type_strings: Vec<_> = types.iter().map(|x|x.to_string()).collect();
+                write!(f, "Multiple({})",type_strings.join(", "))
             }
         }
     }
@@ -98,14 +132,6 @@ impl RDFNodeType {
             _ => {
                 unimplemented!()
             }
-        }
-    }
-
-    pub fn union(&self, other: &RDFNodeType) -> RDFNodeType {
-        if self == other {
-            self.clone()
-        } else {
-            RDFNodeType::MultiType
         }
     }
 
@@ -169,7 +195,7 @@ impl RDFNodeType {
             RDFNodeType::None => {
                 panic!()
             }
-            RDFNodeType::MultiType => {
+            RDFNodeType::MultiType(..) => {
                 panic!()
             }
         }
@@ -194,7 +220,7 @@ impl RDFNodeType {
                 }
             },
             RDFNodeType::None => DataType::Null,
-            RDFNodeType::MultiType => todo!(),
+            RDFNodeType::MultiType(..) => todo!(),
         }
     }
 }

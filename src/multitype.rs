@@ -1,8 +1,8 @@
 use crate::{BaseRDFNodeType, RDFNodeType, LANG_STRING_LANG_FIELD, LANG_STRING_VALUE_FIELD};
-use oxrdf::vocab::{rdf, xsd};
-use polars::prelude::{as_struct, col, lit, IntoLazy, JoinArgs, LazyFrame, LiteralValue};
+use oxrdf::vocab::{rdf};
+use polars::prelude::{as_struct, col, lit, LazyFrame, LiteralValue, Expr};
 use polars_core::frame::DataFrame;
-use polars_core::prelude::{DataType, LhsNumOps};
+use polars_core::prelude::{DataType};
 use std::collections::{HashMap, HashSet};
 
 pub const MULTI_IRI_DT: &str = "I";
@@ -75,54 +75,8 @@ pub fn non_multi_type_string(dt: &BaseRDFNodeType) -> String {
     }
 }
 
-pub fn create_compatible_solution_mappings(
-    mut left_mappings: LazyFrame,
-    mut left_datatypes: HashMap<String, RDFNodeType>,
-    mut right_mappings: LazyFrame,
-    mut right_datatypes: HashMap<String, RDFNodeType>,
-) -> (
-    LazyFrame,
-    HashMap<String, RDFNodeType>,
-    LazyFrame,
-    HashMap<String, RDFNodeType>,
-) {
-    for (v, dt) in &right_datatypes {
-        if let Some(left_dt) = left_datatypes.get(v) {
-            if dt != left_dt {
-                let left_multitypes;
-                if let RDFNodeType::MultiType(types) = left_dt {
-                    left_multitypes = types.clone();
-                } else {
-                    left_mappings = convert_lf_col_to_multitype(left_mappings, v, left_dt);
-                    left_multitypes = vec![BaseRDFNodeType::from_rdf_node_type(left_dt)];
-                }
-                let right_multitypes;
-                if let RDFNodeType::MultiType(types) = dt {
-                    right_multitypes = types.clone();
-                } else {
-                    right_mappings = convert_lf_col_to_multitype(right_mappings, v, dt);
-                    right_multitypes = vec![BaseRDFNodeType::from_rdf_node_type(dt)];
-                }
-                left_datatypes.insert(v.clone(), RDFNodeType::MultiType(left_multitypes));
-                right_datatypes.insert(v.clone(), RDFNodeType::MultiType(right_multitypes));
-            }
-        }
-    }
-    for (v, dt) in &left_datatypes {
-        if right_datatypes.contains_key(v) {
-            right_datatypes.insert(v.clone(), dt.clone());
-        }
-    }
-    (
-        left_mappings,
-        left_datatypes,
-        right_mappings,
-        right_datatypes,
-    )
-}
-
 fn as_sorted_vec(types: HashSet<BaseRDFNodeType>) -> Vec<BaseRDFNodeType> {
-    let mut types = types.into_iter().collect();
+    let mut types:Vec<_> = types.into_iter().collect();
     types.sort();
     types
 }
@@ -146,19 +100,27 @@ pub fn create_join_compatible_solution_mappings(
             if right_dt != left_dt {
                 if let RDFNodeType::MultiType(left_types) = left_dt {
                     if let RDFNodeType::MultiType(right_types) = right_dt {
-                        let right_set = HashSet::from_iter(right_types.clone().into_iter());
-                        let left_set = HashSet::from_iter(left_types.clone().into_iter());
+                        let right_set: HashSet<BaseRDFNodeType> = HashSet::from_iter(right_types.clone().into_iter());
+                        let left_set: HashSet<BaseRDFNodeType> = HashSet::from_iter(left_types.clone().into_iter());
                         if inner {
-                            let left_remove = &left_set - &right_set;
-                            let right_remove = &right_set - &left_set;
+                            //let left_remove = &left_set - &right_set;
+                            //let right_remove = &right_set - &left_set;
                             let mut keep: Vec<_> = left_set.intersection(&right_set).cloned().collect();
                             keep.sort();
                             if keep.is_empty() {
                                 left_mappings = left_mappings.filter(lit(false)).with_column(lit(true).alias(v));
-                                right_mappings = left_mappings.filter(lit(false)).with_column(lit(true).alias(v));
+                                right_mappings = right_mappings.filter(lit(false)).with_column(lit(true).alias(v));
+                                new_left_datatypes.insert(v.clone(), RDFNodeType::None);
+                                new_right_datatypes.insert(v.clone(), RDFNodeType::None);
+                            } else if keep.len() == 1 {
+                                let t = keep.get(0).unwrap();
+                                left_mappings = force_convert_multicol_to_single_col(left_mappings, v, t);
+                                right_mappings = force_convert_multicol_to_single_col(right_mappings, v, t);
+                                new_left_datatypes.insert(v.clone(), t.as_rdf_node_type());
+                                new_right_datatypes.insert(v.clone(), t.as_rdf_node_type());
                             } else {
                                 let all_main_cols = all_multi_main_cols(&keep);
-                                let mut is_col_expr = None;
+                                let mut is_col_expr: Option<Expr> = None;
                                 for c in all_main_cols {
                                     let e = col(v).struct_().field_by_name(&is_dt(&c));
                                     is_col_expr = if let Some(is_col_expr) = is_col_expr {
@@ -174,43 +136,109 @@ pub fn create_join_compatible_solution_mappings(
                                 }
 
                                 left_mappings = left_mappings.filter(
-                                    is_col_expr.cloned().unwrap()
+                                    is_col_expr.as_ref().unwrap().clone()
                                 ).with_column(
                                     as_struct(struct_cols.clone()).alias(v)
                                 );
 
                                 right_mappings = right_mappings.filter(
-                                    is_col_expr.cloned().unwrap()
+                                    is_col_expr.as_ref().unwrap().clone()
                                 ).with_column(
                                     as_struct(struct_cols.clone()).alias(v)
                                 );
+                                new_left_datatypes.insert(v.to_string(), RDFNodeType::MultiType(keep.clone()));
+                                new_right_datatypes.insert(v.to_string(), RDFNodeType::MultiType(keep.clone()));
                             }
                         } else {
                             let mut right_keep: Vec<_> = left_set.intersection(&right_set).cloned().collect();
+                            right_keep.sort();
+                            if right_keep.is_empty() {
+                                right_mappings = right_mappings.filter(lit(false)).with_column(lit(LiteralValue::Null).cast(DataType::Null).alias(v));
+                                new_right_datatypes.insert(v.to_string(), RDFNodeType::None);
+                            } else if right_keep.len() == 1 {
+                                let t = right_keep.get(0).unwrap();
+                                right_mappings = force_convert_multicol_to_single_col(right_mappings, v, t);
+                                new_right_datatypes.insert(v.to_string(), t.as_rdf_node_type());
+                            } else {
+                                let all_main_cols = all_multi_main_cols(&right_keep);
+                                let mut is_col_expr: Option<Expr> = None;
+                                for c in all_main_cols {
+                                    let e = col(v).struct_().field_by_name(&is_dt(&c));
+                                    is_col_expr = if let Some(is_col_expr) = is_col_expr {
+                                        Some(is_col_expr.or(e))
+                                    } else {
+                                        Some(e)
+                                    };
+                                }
+                                let all_cols = all_multi_cols(&right_keep);
+                                let mut struct_cols = vec![];
+                                for c in &all_cols {
+                                    struct_cols.push(col(v).struct_().field_by_name(c).alias(c));
+                                }
 
+                                right_mappings = right_mappings.filter(
+                                    is_col_expr.unwrap().clone()
+                                ).with_column(
+                                    as_struct(struct_cols.clone()).alias(v)
+                                );
+                                new_right_datatypes.insert(v.to_string(), RDFNodeType::MultiType(right_keep.clone()));
+                            }
+                        }
+                    } else { //right not multi
+                        let base_right = BaseRDFNodeType::from_rdf_node_type(right_dt);
+                        if inner {
+                            if left_types.contains(&base_right) {
+                                left_mappings =
+                                    force_convert_multicol_to_single_col(left_mappings, v, &BaseRDFNodeType::from_rdf_node_type(right_dt));
+                                new_left_datatypes.insert(v.clone(), right_dt.clone());
+                            } else {
+                                left_mappings = left_mappings.filter(lit(false)).with_column(lit(LiteralValue::Null).cast(DataType::Null).alias(v));
+                                new_left_datatypes.insert(v.clone(), RDFNodeType::None);
+                                right_mappings = right_mappings.filter(lit(false)).with_column(lit(LiteralValue::Null).cast(DataType::Null).alias(v));
+                                new_right_datatypes.insert(v.clone(), RDFNodeType::None);
+                            }
+                        } else {
+                            if !left_types.contains(&base_right) {
+                                right_mappings = right_mappings.filter(lit(false)).with_column(lit(LiteralValue::Null).cast(DataType::Null).alias(v));
+                                new_right_datatypes.insert(v.clone(), RDFNodeType::None);
+                            }
+                        }
+                    }
+                } else {
+                    let left_basic_dt = BaseRDFNodeType::from_rdf_node_type(left_dt);
+                    if let RDFNodeType::MultiType(right_types) = right_dt { //Left not multi
+                        if inner {
+                            if right_types.contains(&left_basic_dt) {
+                                right_mappings =
+                                    force_convert_multicol_to_single_col(right_mappings, v, &left_basic_dt);
+                                new_right_datatypes.insert(v.clone(), left_dt.clone());
+                            } else {
+                                left_mappings = left_mappings.filter(lit(false)).with_column(lit(LiteralValue::Null).cast(DataType::Null).alias(v));
+                                new_left_datatypes.insert(v.clone(), RDFNodeType::None);
+                                right_mappings = right_mappings.filter(lit(false)).with_column(lit(LiteralValue::Null).cast(DataType::Null).alias(v));
+                                new_right_datatypes.insert(v.clone(), RDFNodeType::None);
+                            }
+                        } else {
+                           if right_types.contains(&left_basic_dt) {
+                               right_mappings =
+                                   force_convert_multicol_to_single_col(right_mappings, v, &left_basic_dt);
+                               new_right_datatypes.insert(v.clone(), left_dt.clone());
+                           } else {
+                               right_mappings = right_mappings.filter(lit(false)).with_column(lit(LiteralValue::Null).cast(DataType::Null).alias(v));
+                               new_right_datatypes.insert(v.clone(), RDFNodeType::None);
+                           }
                         }
                     } else {
                         if inner {
-                            left_mappings =
-                                force_convert_multicol_to_single_col(left_mappings, v, right_dt);
-                            new_left_datatypes.insert(v.clone(), right_dt.clone());
+                            left_mappings = left_mappings.filter(lit(false)).with_column(lit(LiteralValue::Null).cast(DataType::Null).alias(v));
+                            new_left_datatypes.insert(v.clone(), RDFNodeType::None);
+                            right_mappings = right_mappings.filter(lit(false)).with_column(lit(LiteralValue::Null).cast(DataType::Null).alias(v));
+                            new_right_datatypes.insert(v.clone(), RDFNodeType::None);
                         } else {
-                            right_mappings =
-                                convert_lf_col_to_multitype(right_mappings, v, right_dt);
-                            new_right_datatypes.insert(v.clone(), RDFNodeType::MultiType);
+                            right_mappings = right_mappings.filter(lit(false)).with_column(lit(LiteralValue::Null).cast(DataType::Null).alias(v));
+                            new_right_datatypes.insert(v.clone(), RDFNodeType::None);
                         }
                     }
-                } else if right_dt == &RDFNodeType::MultiType {
-                    right_mappings =
-                        force_convert_multicol_to_single_col(right_mappings, v, left_dt);
-                    new_right_datatypes.insert(v.clone(), left_dt.clone());
-                } else {
-                    right_mappings = right_mappings.drop_columns([v]).with_column(
-                        lit(LiteralValue::Null)
-                            .cast(left_dt.polars_data_type())
-                            .alias(v),
-                    );
-                    new_right_datatypes.insert(v.clone(), left_dt.clone());
                 }
             }
         }
