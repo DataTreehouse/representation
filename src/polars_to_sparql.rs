@@ -116,17 +116,17 @@ pub fn basic_rdf_node_type_series_to_term_vec(
 ) -> Vec<Option<Term>> {
     match base_rdfnode_type {
         BaseRDFNodeType::IRI => ser
-            .cast(&DataType::Utf8)
+            .cast(&DataType::String)
             .unwrap()
-            .utf8()
+            .str()
             .unwrap()
             .par_iter()
             .map(|x| x.map(|x| Term::NamedNode(literal_iri_to_namednode(x))))
             .collect(),
         BaseRDFNodeType::BlankNode => ser
-            .cast(&DataType::Utf8)
+            .cast(&DataType::String)
             .unwrap()
-            .utf8()
+            .str()
             .unwrap()
             .par_iter()
             .map(|x| x.map(|x| Term::BlankNode(literal_blanknode_to_blanknode(x))))
@@ -138,13 +138,13 @@ pub fn basic_rdf_node_type_series_to_term_vec(
                     .unwrap()
                     .field_by_name(LANG_STRING_VALUE_FIELD)
                     .unwrap();
-                let value_iter = value_ser.utf8().unwrap().into_iter();
+                let value_iter = value_ser.str().unwrap().into_iter();
                 let lang_ser = ser
                     .struct_()
                     .unwrap()
                     .field_by_name(LANG_STRING_LANG_FIELD)
                     .unwrap();
-                let lang_iter = lang_ser.utf8().unwrap().into_iter();
+                let lang_iter = lang_ser.str().unwrap().into_iter();
                 value_iter
                     .zip(lang_iter)
                     .map(|(value, lang)| {
@@ -163,17 +163,17 @@ pub fn basic_rdf_node_type_series_to_term_vec(
                     .collect()
             }
             xsd::STRING => ser
-                .cast(&DataType::Utf8)
+                .cast(&DataType::String)
                 .unwrap()
-                .utf8()
+                .str()
                 .unwrap()
                 .par_iter()
                 .map(|x| x.map(|x| Term::Literal(Literal::new_simple_literal(x))))
                 .collect(),
             dt => ser
-                .cast(&DataType::Utf8)
+                .cast(&DataType::String)
                 .unwrap()
-                .utf8()
+                .str()
                 .unwrap()
                 .par_iter()
                 .map(|x| x.map(|x| Term::Literal(Literal::new_typed_literal(x, dt.into_owned()))))
@@ -202,12 +202,12 @@ pub fn primitive_polars_type_to_literal_type(data_type: &DataType) -> Option<Nam
         DataType::Int64 => Some(xsd::LONG),
         DataType::Float32 => Some(xsd::FLOAT),
         DataType::Float64 => Some(xsd::DOUBLE),
-        DataType::Utf8 => Some(xsd::STRING),
+        DataType::String => Some(xsd::STRING),
         DataType::Date => Some(xsd::DATE),
         DataType::Datetime(_, Some(_)) => Some(xsd::DATE_TIME_STAMP),
         DataType::Datetime(_, None) => Some(xsd::DATE_TIME),
         DataType::Duration(_) => Some(xsd::DURATION),
-        DataType::Categorical(_) => Some(xsd::STRING),
+        DataType::Categorical(_, _) => Some(xsd::STRING),
         _ => None,
     }
 }

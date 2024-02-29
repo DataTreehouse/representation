@@ -1,9 +1,11 @@
 use crate::{BaseRDFNodeType, RDFNodeType, LANG_STRING_LANG_FIELD, LANG_STRING_VALUE_FIELD};
 use oxrdf::vocab::{rdf};
-use polars::prelude::{as_struct, col, lit, LazyFrame, LiteralValue, Expr};
+use polars::prelude::{as_struct, col, lit, LazyFrame, LiteralValue, Expr, JoinArgs, JoinType};
 use polars_core::frame::DataFrame;
 use polars_core::prelude::{DataType};
 use std::collections::{HashMap, HashSet};
+use polars_core::datatypes::CategoricalOrdering;
+use uuid::Uuid;
 
 pub const MULTI_IRI_DT: &str = "I";
 pub const MULTI_BLANK_DT: &str = "B";
@@ -26,7 +28,7 @@ pub fn convert_lf_col_to_multitype(lf: LazyFrame, c: &str, dt: &RDFNodeType) -> 
         RDFNodeType::BlankNode => lf.with_column(
             as_struct(vec![
                 col(c)
-                    .cast(DataType::Categorical(None))
+                    .cast(DataType::Categorical(None, CategoricalOrdering::Physical))
                     .alias(MULTI_BLANK_DT),
                 lit(true).alias(&is_dt(MULTI_BLANK_DT)),
             ])
@@ -327,6 +329,117 @@ pub fn known_convert_lf_multicol_to_single(
     lf
 }
 
+pub fn explode_multicols<'a>(mut mappings: LazyFrame, multicols: &'a HashMap<String, RDFNodeType>, prefix:&str) -> (LazyFrame, HashMap<&'a String, (Vec<String>, Vec<String>)>) {
+    let mut exprs = vec![];
+    let mut out_map = HashMap::new();
+    for (c,t) in multicols {
+        if let RDFNodeType::MultiType(types) = t{
+            let inner_cols = all_multi_and_is_cols(types);
+            let mut prefixed_inner_cols = vec![];
+            for inner in &inner_cols {
+                let prefixed_inner = format!("{c}{inner}");
+                exprs.push(
+                    col(c).struct_().field_by_name(&inner).alias(&prefixed_inner)
+                );
+                prefixed_inner_cols.push(prefixed_inner);
+            }
+            out_map.insert(c, (inner_cols, prefixed_inner_cols));
+        } else {
+            panic!("Should not be called with columns that do not have multiple types")
+        }
+    }
+    mappings = mappings.with_columns(exprs);
+    mappings = mappings.drop(multicols.keys());
+    (mappings, out_map)
+}
+
+pub fn implode_multicolumns(mapping:LazyFrame, map: HashMap<&String, (Vec<String>, Vec<String>)>) -> LazyFrame {
+    let mut structs = vec![];
+    let mut drop_cols = vec![];
+    for (k, (inner_cols, prefixed_inner_cols)) in map {
+        let mut struct_exprs = vec![];
+        for (inner_col, prefixed_inner_col) in inner_cols.iter().zip(prefixed_inner_cols.iter()) {
+            struct_exprs.push(col(prefixed_inner_col).alias(inner_col));
+        }
+        drop_cols.extend(prefixed_inner_cols);
+        structs.push(as_struct(struct_exprs));
+    }
+    mapping.with_columns(
+        structs
+    ).drop(drop_cols)
+}
+
+pub fn join_workaround(
+    left_mappings: LazyFrame,
+    left_datatypes: &HashMap<String, RDFNodeType>,
+    right_mappings: LazyFrame,
+    right_datatypes: &HashMap<String, RDFNodeType>,
+    join_args: JoinArgs,
+) -> LazyFrame {
+    let mut left_explode = HashMap::new();
+    let mut right_explode = HashMap::new();
+    for (c, t) in left_datatypes {
+        if let RDFNodeType::MultiType(..) = t {
+            left_explode.insert(c.clone(), t.clone());
+        }
+    }
+    for (c, t) in right_datatypes {
+        if let RDFNodeType::MultiType(..) = t {
+            right_explode.insert(c.clone(), t.clone());
+        }
+    }
+    let prefix = Uuid::new_v4().to_string();
+    let (mut left_mappings, left_exploded) = explode_multicols(left_mappings, &left_explode, &prefix);
+    let (right_mappings, mut right_exploded) = explode_multicols(right_mappings, &right_explode, &prefix);
+
+    let mut on = vec![];
+    let mut no_join = false;
+    for (c, t) in left_datatypes {
+        if right_datatypes.contains_key(c) {
+            let left_set: HashSet<_> = if let Some((_, prefixed_inner_columns)) = left_exploded.get(c) {
+                prefixed_inner_columns.iter().collect()
+            } else {
+                HashSet::from([c])
+            };
+            let right_set: HashSet<_> = if let Some((_, prefixed_inner_columns)) = right_exploded.get(c) {
+                prefixed_inner_columns.iter().collect()
+            } else {
+                HashSet::from([c])
+            };
+            let intersection:Vec<_> = left_set.intersection(&right_set).map(|x|col(*x)).collect();
+            if intersection.is_empty() {
+                no_join = true;
+                break;
+            } else {
+                on.extend(intersection);
+            }
+        }
+    }
+    if no_join {
+        left_mappings = left_mappings.join(right_mappings, [lit(false)], [lit(true)], join_args);
+    } else if !on.is_empty() {
+        left_mappings = left_mappings.join(right_mappings, &on, &on, join_args);
+    } else {
+        left_mappings = left_mappings.join(right_mappings, &[], &[], JoinType::Cross.into());
+    }
+    let mut unified_exploded = HashMap::new();
+    for (c, (mut left_inner_columns, mut left_prefixed_inner_columns)) in left_exploded {
+        if let Some((right_inner_columns, right_prefixed_inner_columns)) = right_exploded.remove(c) {
+            for (r, pr) in right_inner_columns.into_iter().zip(right_prefixed_inner_columns.into_iter()) {
+                if !left_inner_columns.contains(&r) {
+                    left_inner_columns.push(r);
+                    left_prefixed_inner_columns.push(pr);
+                }
+            }
+        }
+        unified_exploded.insert(c, (left_inner_columns, left_prefixed_inner_columns));
+    }
+    unified_exploded.extend(right_exploded.into_iter());
+
+    left_mappings = implode_multicolumns(left_mappings, unified_exploded);
+    left_mappings
+}
+
 pub fn lf_printer(lf: &LazyFrame) {
     let df = lf_destruct(lf);
     println!("DF: {}", df);
@@ -344,7 +457,7 @@ pub fn lf_destruct(lf: &LazyFrame) -> DataFrame {
     // for c in colnames {
     //     let ser = df.column(&c).unwrap();
     //     if let DataType::Categorical(_) = ser.dtype() {
-    //         series_vec.push(ser.cast(&DataType::Utf8).unwrap());
+    //         series_vec.push(ser.cast(&DataType::String).unwrap());
     //     } else if let DataType::Struct(fields) = ser.dtype() {
     //         if fields.len() == 3 {
     //             let mut tmp_lf = DataFrame::new(vec![ser.clone()]).unwrap().lazy();
@@ -355,17 +468,17 @@ pub fn lf_destruct(lf: &LazyFrame) -> DataFrame {
     //                 col(&c)
     //                     .struct_()
     //                     .field_by_name(MULTI_VALUE_COL)
-    //                     .cast(DataType::Utf8)
+    //                     .cast(DataType::String)
     //                     .alias(&value_name),
     //                 col(&c)
     //                     .struct_()
     //                     .field_by_name(MULTI_LANG_COL)
-    //                     .cast(DataType::Utf8)
+    //                     .cast(DataType::String)
     //                     .alias(&lang_name),
     //                 col(&c)
     //                     .struct_()
     //                     .field_by_name(MULTI_DT_COL)
-    //                     .cast(DataType::Utf8)
+    //                     .cast(DataType::String)
     //                     .alias(&dt_name),
     //             ]);
     //             let mut tmp_df = tmp_lf.collect().unwrap();
