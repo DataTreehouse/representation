@@ -219,7 +219,7 @@ impl RDFNodeType {
                     todo!("Datatype {} not supported yet", n)
                 }
             },
-            RDFNodeType::None => DataType::Null,
+            RDFNodeType::None => DataType::Boolean,
             RDFNodeType::MultiType(..) => todo!(),
         }
     }

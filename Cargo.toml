@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 oxrdf = {version = "0.1.7", features = ["oxsdatatypes"]}
-polars = {version="0.37.0", features=["performant", "lazy", "dtype-full", "timezones", "polars-time", "partition_by"] }
+polars = {version="0.37.0", features=["performant", "lazy", "dtype-full", "timezones", "polars-time", "partition_by", "cross_join"] }
 polars-core = "0.37.0"
 chrono = "0.4"
 spargebra = "0.2.8"
