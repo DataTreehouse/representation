@@ -60,7 +60,10 @@ pub fn convert_lf_col_to_multitype(lf: LazyFrame, c: &str, dt: &RDFNodeType) -> 
             }
         }
         RDFNodeType::None => {
-            panic!()
+            lf.with_column(as_struct(vec![
+                col(c).alias(MULTI_NONE_DT),
+                lit(true).alias(&is_dt(MULTI_NONE_DT)),
+            ]).alias(c))
         }
         RDFNodeType::MultiType(..) => lf,
     }
@@ -253,9 +256,10 @@ pub fn create_join_compatible_solution_mappings(
     )
 }
 
-fn compress_actual_multitypes(df: DataFrame, rdf_node_types: HashMap<String, RDFNodeType>) -> (DataFrame, HashMap<String, RDFNodeType>) {
-    let updated_types = HashMap::new();
-    let mut struct_exprs = vec![];
+pub fn compress_actual_multitypes(mut df: DataFrame, mut rdf_node_types: HashMap<String, RDFNodeType>) -> (DataFrame, HashMap<String, RDFNodeType>) {
+    let mut updated_types = HashMap::new();
+    let mut col_exprs = vec![];
+    let mut to_single = vec![];
     for (c, t) in rdf_node_types {
         if let RDFNodeType::MultiType(types) = t {
             let mut keep_types = vec![];
@@ -266,17 +270,41 @@ fn compress_actual_multitypes(df: DataFrame, rdf_node_types: HashMap<String, RDF
                 let is_col = is_dt(&ts);
                 let any_values = df.column(&c).unwrap().struct_().unwrap().field_by_name(&is_col).unwrap().bool().unwrap().any();
                 if !any_values {
-                    keep_types.push(t)
-                } else {
                     any_dropped = true;
+                } else {
+                    keep_types.push(t);
                 }
             }
             if any_dropped {
-
+                if keep_types.is_empty() {
+                    col_exprs.push(lit(LiteralValue::Null).cast(DataType::Null).alias(&c));
+                    updated_types.insert(c, RDFNodeType::None);
+                } else if keep_types.len() == 1 {
+                    let t = keep_types.pop().unwrap();
+                    to_single.push((c,t));
+                } else {
+                    let all_cols_exprs:Vec<_> = all_multi_and_is_cols(&keep_types).into_iter().map(|x|col(&x)).collect();
+                    col_exprs.push(as_struct(all_cols_exprs).alias(&c));
+                    updated_types.insert(c, RDFNodeType::MultiType(keep_types));
+                }
+            } else {
+                updated_types.insert(c, RDFNodeType::MultiType(keep_types));
             }
+        } else {
+            updated_types.insert(c, t);
         }
     }
-    ()
+    let mut lf = df.lazy();
+    for (c,t) in to_single {
+        lf = known_convert_lf_multicol_to_single(lf, &c, &t);
+        updated_types.insert(c, t.as_rdf_node_type());
+    }
+
+    if !col_exprs.is_empty() {
+        lf = lf.with_columns(col_exprs);
+    }
+    df = lf.collect().unwrap();
+    (df, updated_types)
 }
 
 pub fn split_df_multicols(df: DataFrame, types: &HashMap<String, RDFNodeType>) -> Vec<(DataFrame, HashMap<String, RDFNodeType>)>{
@@ -401,13 +429,13 @@ pub fn explode_multicols<'a>(mut mappings: LazyFrame, multicols: &'a HashMap<Str
 pub fn implode_multicolumns(mapping:LazyFrame, map: HashMap<&String, (Vec<String>, Vec<String>)>) -> LazyFrame {
     let mut structs = vec![];
     let mut drop_cols = vec![];
-    for (_, (inner_cols, prefixed_inner_cols)) in map {
+    for (c, (inner_cols, prefixed_inner_cols)) in map {
         let mut struct_exprs = vec![];
         for (inner_col, prefixed_inner_col) in inner_cols.iter().zip(prefixed_inner_cols.iter()) {
             struct_exprs.push(col(prefixed_inner_col).alias(inner_col));
         }
         drop_cols.extend(prefixed_inner_cols);
-        structs.push(as_struct(struct_exprs));
+        structs.push(as_struct(struct_exprs).alias(c));
     }
     mapping.with_columns(
         structs
