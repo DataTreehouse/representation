@@ -1,4 +1,4 @@
-use crate::multitype::{all_multi_main_cols};
+use crate::multitype::all_multi_main_cols;
 use crate::{
     literal_blanknode_to_blanknode, literal_iri_to_namednode, BaseRDFNodeType, RDFNodeType,
     LANG_STRING_LANG_FIELD, LANG_STRING_VALUE_FIELD,
@@ -32,6 +32,7 @@ pub fn df_as_result(df: DataFrame, dtypes: &HashMap<String, RDFNodeType>) -> Que
     let height = df.height();
     for (k, v) in dtypes {
         if let Ok(ser) = df.column(k) {
+            println!("ser: {}", ser);
             //TODO: Perhaps correct this upstream?
             variables.push(Variable::new_unchecked(k));
             let terms: Vec<_> = match v {
@@ -71,23 +72,24 @@ pub fn df_as_result(df: DataFrame, dtypes: &HashMap<String, RDFNodeType>) -> Que
                             let ser = df.unwrap().drop_in_place(&colname).unwrap();
                             basic_rdf_node_type_series_to_term_vec(&ser, t)
                         } else {
-                            basic_rdf_node_type_series_to_term_vec(ser, t)
+                            basic_rdf_node_type_series_to_term_vec(
+                                &ser.struct_().unwrap().field_by_name(&colname).unwrap(),
+                                t,
+                            )
                         };
                         iters.push(v.into_iter())
                     }
                     let mut final_terms = vec![];
-                    for i in 0..iters.len() {
-                        loop {
-                            if let Some(term) = iters.get_mut(i).unwrap().next() {
-                                final_terms.push(term);
-                            } else {
-                                break;
+                    for _ in 0..height {
+                        let mut use_term = None;
+                        for iter in iters.iter_mut() {
+                            if let Some(term) = iter.next() {
+                                if let Some(term) = term {
+                                    use_term = Some(term);
+                                }
                             }
                         }
-
-                        if i - 1 == iters.len() {
-                            final_terms.push(None);
-                        }
+                        final_terms.push(use_term);
                     }
                     final_terms
                 }
@@ -95,6 +97,8 @@ pub fn df_as_result(df: DataFrame, dtypes: &HashMap<String, RDFNodeType>) -> Que
             all_terms.push(terms);
         }
     }
+    println!("DF: {}", df);
+    println!("terms: {:?}", all_terms);
     let mut solns = vec![];
     for _i in 0..height {
         let mut soln = vec![];

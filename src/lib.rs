@@ -1,9 +1,9 @@
 pub mod literals;
 pub mod multitype;
+pub mod polars_to_sparql;
+pub mod query_context;
 pub mod solution_mapping;
 pub mod sparql_to_polars;
-pub mod query_context;
-pub mod polars_to_sparql;
 
 use oxrdf::vocab::{rdf, xsd};
 use oxrdf::{BlankNode, NamedNode, NamedNodeRef, NamedOrBlankNode, Term};
@@ -21,10 +21,9 @@ pub enum RepresentationError {
 pub const LANG_STRING_VALUE_FIELD: &str = "<http://www.w3.org/1999/02/22-rdf-syntax-ns#langString>";
 pub const LANG_STRING_LANG_FIELD: &str = "l";
 
-const RDF_NODE_TYPE_IRI:&str = "IRI";
-const RDF_NODE_TYPE_BLANK_NODE:&str = "Blank";
-const RDF_NODE_TYPE_NONE:&str = "None";
-
+const RDF_NODE_TYPE_IRI: &str = "IRI";
+const RDF_NODE_TYPE_BLANK_NODE: &str = "Blank";
+const RDF_NODE_TYPE_NONE: &str = "None";
 
 #[derive(PartialEq, Clone)]
 pub enum TripleType {
@@ -52,13 +51,15 @@ pub enum BaseRDFNodeType {
 }
 
 impl BaseRDFNodeType {
-    pub fn from_rdf_node_type(r:&RDFNodeType) -> BaseRDFNodeType {
+    pub fn from_rdf_node_type(r: &RDFNodeType) -> BaseRDFNodeType {
         match r {
-            RDFNodeType::IRI => {BaseRDFNodeType::IRI}
-            RDFNodeType::BlankNode => {BaseRDFNodeType::BlankNode}
-            RDFNodeType::Literal(l) => {BaseRDFNodeType::Literal(l.clone())}
-            RDFNodeType::None => {BaseRDFNodeType::None}
-            RDFNodeType::MultiType(_) => {panic!()}
+            RDFNodeType::IRI => BaseRDFNodeType::IRI,
+            RDFNodeType::BlankNode => BaseRDFNodeType::BlankNode,
+            RDFNodeType::Literal(l) => BaseRDFNodeType::Literal(l.clone()),
+            RDFNodeType::None => BaseRDFNodeType::None,
+            RDFNodeType::MultiType(_) => {
+                panic!()
+            }
         }
     }
 
@@ -72,10 +73,10 @@ impl BaseRDFNodeType {
 
     pub fn as_rdf_node_type(&self) -> RDFNodeType {
         match self {
-            BaseRDFNodeType::IRI => {RDFNodeType::IRI}
-            BaseRDFNodeType::BlankNode => {RDFNodeType::BlankNode}
-            BaseRDFNodeType::Literal(l) => {RDFNodeType::Literal(l.clone())}
-            BaseRDFNodeType::None => {RDFNodeType::None}
+            BaseRDFNodeType::IRI => RDFNodeType::IRI,
+            BaseRDFNodeType::BlankNode => RDFNodeType::BlankNode,
+            BaseRDFNodeType::Literal(l) => RDFNodeType::Literal(l.clone()),
+            BaseRDFNodeType::None => RDFNodeType::None,
         }
     }
 }
@@ -115,8 +116,8 @@ impl Display for RDFNodeType {
                 write!(f, "{RDF_NODE_TYPE_NONE}")
             }
             RDFNodeType::MultiType(types) => {
-                let type_strings: Vec<_> = types.iter().map(|x|x.to_string()).collect();
-                write!(f, "Multiple({})",type_strings.join(", "))
+                let type_strings: Vec<_> = types.iter().map(|x| x.to_string()).collect();
+                write!(f, "Multiple({})", type_strings.join(", "))
             }
         }
     }

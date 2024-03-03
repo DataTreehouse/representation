@@ -1,9 +1,13 @@
+use crate::solution_mapping::SolutionMappings;
 use crate::{BaseRDFNodeType, RDFNodeType, LANG_STRING_LANG_FIELD, LANG_STRING_VALUE_FIELD};
 use oxrdf::vocab::{rdf, xsd};
-use polars::prelude::{as_struct, col, lit, Expr, IntoLazy, JoinType, LazyFrame, LiteralValue, coalesce};
+use polars::prelude::{
+    as_struct, coalesce, col, lit, Expr, IntoLazy, JoinType, LazyFrame, LiteralValue, LazyGroupBy
+};
 use polars_core::datatypes::CategoricalOrdering;
-use polars_core::frame::DataFrame;
+use polars_core::frame::{DataFrame, UniqueKeepStrategy};
 use polars_core::prelude::DataType;
+
 use std::collections::{HashMap, HashSet};
 
 pub const MULTI_IRI_DT: &str = "I";
@@ -48,7 +52,9 @@ pub fn convert_lf_col_to_multitype(lf: LazyFrame, c: &str, dt: &RDFNodeType) -> 
                             .struct_()
                             .field_by_name(LANG_STRING_LANG_FIELD)
                             .alias(LANG_STRING_LANG_FIELD),
-                        lit(true).alias(&create_multi_has_this_type_column_name(LANG_STRING_VALUE_FIELD)),
+                        lit(true).alias(&create_multi_has_this_type_column_name(
+                            LANG_STRING_VALUE_FIELD,
+                        )),
                     ])
                     .alias(c),
                 )
@@ -83,7 +89,11 @@ pub fn non_multi_type_string(dt: &BaseRDFNodeType) -> String {
     }
 }
 
-pub fn lf_column_from_categorical(mut lf:LazyFrame, c:&str, rdf_node_types: &HashMap<String, RDFNodeType>) -> LazyFrame {
+pub fn lf_column_from_categorical(
+    mut lf: LazyFrame,
+    c: &str,
+    rdf_node_types: &HashMap<String, RDFNodeType>,
+) -> LazyFrame {
     match rdf_node_types.get(c).unwrap() {
         RDFNodeType::IRI | RDFNodeType::BlankNode => {
             lf = lf.with_column(col(c).cast(DataType::String))
@@ -94,9 +104,16 @@ pub fn lf_column_from_categorical(mut lf:LazyFrame, c:&str, rdf_node_types: &Has
             } else if l.as_ref() == rdf::LANG_STRING {
                 lf = lf.with_column(
                     as_struct(vec![
-                        col(c).struct_().field_by_name(LANG_STRING_VALUE_FIELD).cast(DataType::String),
-                        col(c).struct_().field_by_name(LANG_STRING_LANG_FIELD).cast(DataType::String)
-                    ]).alias(c)
+                        col(c)
+                            .struct_()
+                            .field_by_name(LANG_STRING_VALUE_FIELD)
+                            .cast(DataType::String),
+                        col(c)
+                            .struct_()
+                            .field_by_name(LANG_STRING_LANG_FIELD)
+                            .cast(DataType::String),
+                    ])
+                    .alias(c),
                 )
             }
         }
@@ -105,23 +122,39 @@ pub fn lf_column_from_categorical(mut lf:LazyFrame, c:&str, rdf_node_types: &Has
             let mut fields = vec![];
             for t in types {
                 match t {
-                    BaseRDFNodeType::IRI => {
-                        fields.push(
-                            col(c).struct_().field_by_name(MULTI_IRI_DT).cast(DataType::String)
-                        )
-                    }
-                    BaseRDFNodeType::BlankNode => {
-                        fields.push(
-                            col(c).struct_().field_by_name(MULTI_BLANK_DT).cast(DataType::String)
-                        )
-                    }
+                    BaseRDFNodeType::IRI => fields.push(
+                        col(c)
+                            .struct_()
+                            .field_by_name(MULTI_IRI_DT)
+                            .cast(DataType::String),
+                    ),
+                    BaseRDFNodeType::BlankNode => fields.push(
+                        col(c)
+                            .struct_()
+                            .field_by_name(MULTI_BLANK_DT)
+                            .cast(DataType::String),
+                    ),
                     BaseRDFNodeType::Literal(l) => {
                         if l.as_ref() == xsd::STRING {
-                            fields.push(col(c).struct_().field_by_name(&non_multi_type_string(t)).cast(DataType::String));
-
+                            fields.push(
+                                col(c)
+                                    .struct_()
+                                    .field_by_name(&non_multi_type_string(t))
+                                    .cast(DataType::String),
+                            );
                         } else if l.as_ref() == rdf::LANG_STRING {
-                            fields.push(col(c).struct_().field_by_name(LANG_STRING_VALUE_FIELD).cast(DataType::String));
-                            fields.push(col(c).struct_().field_by_name(LANG_STRING_LANG_FIELD).cast(DataType::String));
+                            fields.push(
+                                col(c)
+                                    .struct_()
+                                    .field_by_name(LANG_STRING_VALUE_FIELD)
+                                    .cast(DataType::String),
+                            );
+                            fields.push(
+                                col(c)
+                                    .struct_()
+                                    .field_by_name(LANG_STRING_LANG_FIELD)
+                                    .cast(DataType::String),
+                            );
                         } else {
                             fields.push(col(c).struct_().field_by_name(&non_multi_type_string(t)));
                         }
@@ -130,7 +163,9 @@ pub fn lf_column_from_categorical(mut lf:LazyFrame, c:&str, rdf_node_types: &Has
                         fields.push(col(c).struct_().field_by_name(MULTI_NONE_DT));
                     }
                 }
-                fields.push(col(c).struct_().field_by_name(&create_multi_has_this_type_column_name(&non_multi_type_string(t))));
+                fields.push(col(c).struct_().field_by_name(
+                    &create_multi_has_this_type_column_name(&non_multi_type_string(t)),
+                ));
             }
             lf = lf.with_column(as_struct(fields).alias(c));
         }
@@ -138,45 +173,90 @@ pub fn lf_column_from_categorical(mut lf:LazyFrame, c:&str, rdf_node_types: &Has
     lf
 }
 
-pub fn lf_column_to_categorical(mut lf:LazyFrame, c:&str, rdf_node_types: &HashMap<String, RDFNodeType>) -> LazyFrame {
+pub fn lf_column_to_categorical(
+    mut lf: LazyFrame,
+    c: &str,
+    rdf_node_types: &HashMap<String, RDFNodeType>,
+) -> LazyFrame {
     match rdf_node_types.get(c).unwrap() {
         RDFNodeType::IRI | RDFNodeType::BlankNode => {
-            lf = lf.with_column(col(c).cast(DataType::Categorical(None, CategoricalOrdering::Physical)))
+            lf = lf.with_column(
+                col(c).cast(DataType::Categorical(None, CategoricalOrdering::Physical)),
+            )
         }
         RDFNodeType::Literal(l) => {
             if l.as_ref() == xsd::STRING {
-                lf = lf.with_column(col(c).cast(DataType::Categorical(None, CategoricalOrdering::Physical)))
+                lf = lf.with_column(
+                    col(c).cast(DataType::Categorical(None, CategoricalOrdering::Physical)),
+                )
             } else if l.as_ref() == rdf::LANG_STRING {
                 lf = lf.with_column(
                     as_struct(vec![
-                        col(c).struct_().field_by_name(LANG_STRING_VALUE_FIELD).cast(DataType::Categorical(None, CategoricalOrdering::Physical)),
-                        col(c).struct_().field_by_name(LANG_STRING_LANG_FIELD).cast(DataType::Categorical(None, CategoricalOrdering::Physical))
-                    ]).alias(c)
+                        col(c)
+                            .struct_()
+                            .field_by_name(LANG_STRING_VALUE_FIELD)
+                            .cast(DataType::Categorical(None, CategoricalOrdering::Physical)),
+                        col(c)
+                            .struct_()
+                            .field_by_name(LANG_STRING_LANG_FIELD)
+                            .cast(DataType::Categorical(None, CategoricalOrdering::Physical)),
+                    ])
+                    .alias(c),
                 )
             }
         }
         RDFNodeType::None => {}
         RDFNodeType::MultiType(types) => {
+            let mut found_cat_expr = false;
             let mut fields = vec![];
             for t in types {
                 match t {
                     BaseRDFNodeType::IRI => {
+                        found_cat_expr = true;
                         fields.push(
-                            col(c).struct_().field_by_name(MULTI_IRI_DT).cast(DataType::Categorical(None, CategoricalOrdering::Physical))
+                            col(c)
+                                .struct_()
+                                .field_by_name(MULTI_IRI_DT)
+                                .cast(DataType::Categorical(None, CategoricalOrdering::Physical)),
                         )
                     }
                     BaseRDFNodeType::BlankNode => {
+                        found_cat_expr = true;
                         fields.push(
-                            col(c).struct_().field_by_name(MULTI_BLANK_DT).cast(DataType::Categorical(None, CategoricalOrdering::Physical))
+                            col(c)
+                                .struct_()
+                                .field_by_name(MULTI_BLANK_DT)
+                                .cast(DataType::Categorical(None, CategoricalOrdering::Physical)),
                         )
                     }
                     BaseRDFNodeType::Literal(l) => {
                         if l.as_ref() == xsd::STRING {
-                            fields.push(col(c).struct_().field_by_name(&non_multi_type_string(t)).cast(DataType::Categorical(None, CategoricalOrdering::Physical)));
-
+                            found_cat_expr = true;
+                            fields.push(
+                                col(c)
+                                    .struct_()
+                                    .field_by_name(&non_multi_type_string(t))
+                                    .cast(DataType::Categorical(
+                                        None,
+                                        CategoricalOrdering::Physical,
+                                    )),
+                            );
                         } else if l.as_ref() == rdf::LANG_STRING {
-                            fields.push(col(c).struct_().field_by_name(LANG_STRING_VALUE_FIELD).cast(DataType::Categorical(None, CategoricalOrdering::Physical)));
-                            fields.push(col(c).struct_().field_by_name(LANG_STRING_LANG_FIELD).cast(DataType::Categorical(None, CategoricalOrdering::Physical)));
+                            found_cat_expr = true;
+                            fields.push(
+                                col(c)
+                                    .struct_()
+                                    .field_by_name(LANG_STRING_VALUE_FIELD)
+                                    .cast(DataType::Categorical(
+                                        None,
+                                        CategoricalOrdering::Physical,
+                                    )),
+                            );
+                            fields.push(
+                                col(c).struct_().field_by_name(LANG_STRING_LANG_FIELD).cast(
+                                    DataType::Categorical(None, CategoricalOrdering::Physical),
+                                ),
+                            );
                         } else {
                             fields.push(col(c).struct_().field_by_name(&non_multi_type_string(t)));
                         }
@@ -185,9 +265,13 @@ pub fn lf_column_to_categorical(mut lf:LazyFrame, c:&str, rdf_node_types: &HashM
                         fields.push(col(c).struct_().field_by_name(MULTI_NONE_DT));
                     }
                 }
-                fields.push(col(c).struct_().field_by_name(&create_multi_has_this_type_column_name(&non_multi_type_string(t))));
+                fields.push(col(c).struct_().field_by_name(
+                    &create_multi_has_this_type_column_name(&non_multi_type_string(t)),
+                ));
             }
-            lf = lf.with_column(as_struct(fields));
+            if found_cat_expr {
+                lf = lf.with_column(as_struct(fields).alias(c));
+            }
         }
     }
     lf
@@ -198,13 +282,17 @@ pub fn create_join_compatible_solution_mappings(
     mut left_datatypes: HashMap<String, RDFNodeType>,
     mut right_mappings: LazyFrame,
     mut right_datatypes: HashMap<String, RDFNodeType>,
-    inner: bool,
+    join_type: JoinType,
 ) -> (
     LazyFrame,
     HashMap<String, RDFNodeType>,
     LazyFrame,
     HashMap<String, RDFNodeType>,
 ) {
+    println!("Create compat Left datatypes: {:?}", left_datatypes);
+    println!("Create compat Right datatypes: {:?}", right_datatypes);
+    println!("Create compat Left: {:?}", left_mappings.clone().collect().unwrap());
+    println!("Create compat Right: {:?}", right_mappings.clone().collect().unwrap());
     let mut new_left_datatypes = HashMap::new();
     let mut new_right_datatypes = HashMap::new();
     for (v, right_dt) in &right_datatypes {
@@ -216,149 +304,207 @@ pub fn create_join_compatible_solution_mappings(
                             HashSet::from_iter(right_types.clone().into_iter());
                         let left_set: HashSet<BaseRDFNodeType> =
                             HashSet::from_iter(left_types.clone().into_iter());
-                        if inner {
-                            //let left_remove = &left_set - &right_set;
-                            //let right_remove = &right_set - &left_set;
-                            let mut keep: Vec<_> =
-                                left_set.intersection(&right_set).cloned().collect();
-                            keep.sort();
-                            if keep.is_empty() {
-                                left_mappings = left_mappings
-                                    .filter(lit(false))
-                                    .with_column(lit(true).alias(v));
-                                right_mappings = right_mappings
-                                    .filter(lit(false))
-                                    .with_column(lit(true).alias(v));
-                                new_left_datatypes.insert(v.clone(), RDFNodeType::None);
-                                new_right_datatypes.insert(v.clone(), RDFNodeType::None);
-                            } else if keep.len() == 1 {
-                                let t = keep.get(0).unwrap();
-                                left_mappings =
-                                    force_convert_multicol_to_single_col(left_mappings, v, t);
-                                right_mappings =
-                                    force_convert_multicol_to_single_col(right_mappings, v, t);
-                                new_left_datatypes.insert(v.clone(), t.as_rdf_node_type());
-                                new_right_datatypes.insert(v.clone(), t.as_rdf_node_type());
-                            } else {
-                                let all_main_cols = all_multi_main_cols(&keep);
-                                let mut is_col_expr: Option<Expr> = None;
-                                for c in all_main_cols {
-                                    let e = col(v).struct_().field_by_name(&create_multi_has_this_type_column_name(&c));
-                                    is_col_expr = if let Some(is_col_expr) = is_col_expr {
-                                        Some(is_col_expr.or(e))
-                                    } else {
-                                        Some(e)
-                                    };
-                                }
-                                let all_cols = all_multi_cols(&keep);
-                                let mut struct_cols = vec![];
-                                for c in &all_cols {
-                                    struct_cols.push(col(v).struct_().field_by_name(c).alias(c));
-                                }
+                        match join_type {
+                            JoinType::Inner => {
+                                let mut keep: Vec<_> =
+                                    left_set.intersection(&right_set).cloned().collect();
+                                keep.sort();
+                                if keep.is_empty() {
+                                    left_mappings = left_mappings
+                                        .filter(lit(false))
+                                        .with_column(lit(true).alias(v));
+                                    right_mappings = right_mappings
+                                        .filter(lit(false))
+                                        .with_column(lit(true).alias(v));
+                                    new_left_datatypes.insert(v.clone(), RDFNodeType::None);
+                                    new_right_datatypes.insert(v.clone(), RDFNodeType::None);
+                                } else if keep.len() == 1 {
+                                    let t = keep.get(0).unwrap();
+                                    left_mappings =
+                                        force_convert_multicol_to_single_col(left_mappings, v, t);
+                                    right_mappings =
+                                        force_convert_multicol_to_single_col(right_mappings, v, t);
+                                    new_left_datatypes.insert(v.clone(), t.as_rdf_node_type());
+                                    new_right_datatypes.insert(v.clone(), t.as_rdf_node_type());
+                                } else {
+                                    let all_main_cols = all_multi_main_cols(&keep);
+                                    let mut is_col_expr: Option<Expr> = None;
+                                    for c in all_main_cols {
+                                        let e = col(v).struct_().field_by_name(
+                                            &create_multi_has_this_type_column_name(&c),
+                                        );
+                                        is_col_expr = if let Some(is_col_expr) = is_col_expr {
+                                            Some(is_col_expr.or(e))
+                                        } else {
+                                            Some(e)
+                                        };
+                                    }
+                                    let all_cols = all_multi_cols(&keep);
+                                    let mut struct_cols = vec![];
+                                    for c in &all_cols {
+                                        struct_cols
+                                            .push(col(v).struct_().field_by_name(c).alias(c));
+                                    }
 
-                                left_mappings = left_mappings
-                                    .filter(is_col_expr.as_ref().unwrap().clone())
-                                    .with_column(as_struct(struct_cols.clone()).alias(v));
+                                    left_mappings = left_mappings
+                                        .filter(is_col_expr.as_ref().unwrap().clone())
+                                        .with_column(as_struct(struct_cols.clone()).alias(v));
 
-                                right_mappings = right_mappings
-                                    .filter(is_col_expr.as_ref().unwrap().clone())
-                                    .with_column(as_struct(struct_cols.clone()).alias(v));
-                                new_left_datatypes
-                                    .insert(v.to_string(), RDFNodeType::MultiType(keep.clone()));
-                                new_right_datatypes
-                                    .insert(v.to_string(), RDFNodeType::MultiType(keep.clone()));
+                                    right_mappings = right_mappings
+                                        .filter(is_col_expr.as_ref().unwrap().clone())
+                                        .with_column(as_struct(struct_cols.clone()).alias(v));
+                                    new_left_datatypes.insert(
+                                        v.to_string(),
+                                        RDFNodeType::MultiType(keep.clone()),
+                                    );
+                                    new_right_datatypes.insert(
+                                        v.to_string(),
+                                        RDFNodeType::MultiType(keep.clone()),
+                                    );
+                                }
                             }
-                        } else {
-                            let mut right_keep: Vec<_> =
-                                left_set.intersection(&right_set).cloned().collect();
-                            right_keep.sort();
-                            if right_keep.is_empty() {
-                                right_mappings = right_mappings.filter(lit(false)).with_column(
-                                    lit(LiteralValue::Null)
-                                        .cast(RDFNodeType::None.polars_data_type())
-                                        .alias(v),
-                                );
-                                new_right_datatypes.insert(v.to_string(), RDFNodeType::None);
-                            } else if right_keep.len() == 1 {
-                                let t = right_keep.get(0).unwrap();
-                                right_mappings =
-                                    force_convert_multicol_to_single_col(right_mappings, v, t);
-                                new_right_datatypes.insert(v.to_string(), t.as_rdf_node_type());
-                            } else {
-                                let all_main_cols = all_multi_main_cols(&right_keep);
-                                let mut is_col_expr: Option<Expr> = None;
-                                for c in all_main_cols {
-                                    let e = col(v).struct_().field_by_name(&create_multi_has_this_type_column_name(&c));
-                                    is_col_expr = if let Some(is_col_expr) = is_col_expr {
-                                        Some(is_col_expr.or(e))
-                                    } else {
-                                        Some(e)
-                                    };
-                                }
-                                let all_cols = all_multi_cols(&right_keep);
-                                let mut struct_cols = vec![];
-                                for c in &all_cols {
-                                    struct_cols.push(col(v).struct_().field_by_name(c).alias(c));
-                                }
+                            JoinType::Left => {
+                                let mut right_keep: Vec<_> =
+                                    left_set.intersection(&right_set).cloned().collect();
+                                right_keep.sort();
+                                if right_keep.is_empty() {
+                                    right_mappings = right_mappings.filter(lit(false)).with_column(
+                                        lit(LiteralValue::Null)
+                                            .cast(RDFNodeType::None.polars_data_type())
+                                            .alias(v),
+                                    );
+                                    new_right_datatypes.insert(v.to_string(), RDFNodeType::None);
+                                } else if right_keep.len() == 1 {
+                                    let t = right_keep.get(0).unwrap();
+                                    right_mappings =
+                                        force_convert_multicol_to_single_col(right_mappings, v, t);
+                                    new_right_datatypes.insert(v.to_string(), t.as_rdf_node_type());
+                                } else {
+                                    let all_main_cols = all_multi_main_cols(&right_keep);
+                                    let mut is_col_expr: Option<Expr> = None;
+                                    for c in all_main_cols {
+                                        let e = col(v).struct_().field_by_name(
+                                            &create_multi_has_this_type_column_name(&c),
+                                        );
+                                        is_col_expr = if let Some(is_col_expr) = is_col_expr {
+                                            Some(is_col_expr.or(e))
+                                        } else {
+                                            Some(e)
+                                        };
+                                    }
+                                    let all_cols = all_multi_cols(&right_keep);
+                                    let mut struct_cols = vec![];
+                                    for c in &all_cols {
+                                        struct_cols
+                                            .push(col(v).struct_().field_by_name(c).alias(c));
+                                    }
 
-                                right_mappings = right_mappings
-                                    .filter(is_col_expr.unwrap().clone())
-                                    .with_column(as_struct(struct_cols.clone()).alias(v));
-                                new_right_datatypes.insert(
-                                    v.to_string(),
-                                    RDFNodeType::MultiType(right_keep.clone()),
-                                );
+                                    right_mappings = right_mappings
+                                        .filter(is_col_expr.unwrap().clone())
+                                        .with_column(as_struct(struct_cols.clone()).alias(v));
+                                    new_right_datatypes.insert(
+                                        v.to_string(),
+                                        RDFNodeType::MultiType(right_keep.clone()),
+                                    );
+                                }
+                            }
+                            _ => {
+                                todo!()
                             }
                         }
                     } else {
                         //right not multi
                         let base_right = BaseRDFNodeType::from_rdf_node_type(right_dt);
-                        if inner {
-                            if left_types.contains(&base_right) {
-                                left_mappings = force_convert_multicol_to_single_col(
-                                    left_mappings,
-                                    v,
-                                    &BaseRDFNodeType::from_rdf_node_type(right_dt),
-                                );
-                                new_left_datatypes.insert(v.clone(), right_dt.clone());
-                            } else {
-                                left_mappings = left_mappings.filter(lit(false)).with_column(
-                                    lit(LiteralValue::Null)
-                                        .cast(RDFNodeType::None.polars_data_type())
-                                        .alias(v),
-                                );
-                                new_left_datatypes.insert(v.clone(), RDFNodeType::None);
-                                right_mappings = right_mappings.filter(lit(false)).with_column(
-                                    lit(LiteralValue::Null)
-                                        .cast(RDFNodeType::None.polars_data_type())
-                                        .alias(v),
-                                );
-                                new_right_datatypes.insert(v.clone(), RDFNodeType::None);
+                        match join_type {
+                            JoinType::Inner => {
+                                if left_types.contains(&base_right) {
+                                    left_mappings = force_convert_multicol_to_single_col(
+                                        left_mappings,
+                                        v,
+                                        &BaseRDFNodeType::from_rdf_node_type(right_dt),
+                                    );
+                                    new_left_datatypes.insert(v.clone(), right_dt.clone());
+                                } else {
+                                    left_mappings = left_mappings.filter(lit(false)).with_column(
+                                        lit(LiteralValue::Null)
+                                            .cast(RDFNodeType::None.polars_data_type())
+                                            .alias(v),
+                                    );
+                                    new_left_datatypes.insert(v.clone(), RDFNodeType::None);
+                                    right_mappings = right_mappings.filter(lit(false)).with_column(
+                                        lit(LiteralValue::Null)
+                                            .cast(RDFNodeType::None.polars_data_type())
+                                            .alias(v),
+                                    );
+                                    new_right_datatypes.insert(v.clone(), RDFNodeType::None);
+                                }
                             }
-                        } else {
-                            if !left_types.contains(&base_right) {
-                                right_mappings = right_mappings.filter(lit(false)).with_column(
-                                    lit(LiteralValue::Null)
-                                        .cast(RDFNodeType::None.polars_data_type())
-                                        .alias(v),
-                                );
-                                new_right_datatypes.insert(v.clone(), RDFNodeType::None);
+                            JoinType::Left => {
+                                if !left_types.contains(&base_right) {
+                                    right_mappings = right_mappings.filter(lit(false)).with_column(
+                                        lit(LiteralValue::Null)
+                                            .cast(RDFNodeType::None.polars_data_type())
+                                            .alias(v),
+                                    );
+                                    new_right_datatypes.insert(v.clone(), RDFNodeType::None);
+                                }
+                            }
+                            _ => {
+                                todo!()
                             }
                         }
                     }
-                } else {
+                } else { //left not multi
                     let left_basic_dt = BaseRDFNodeType::from_rdf_node_type(left_dt);
                     if let RDFNodeType::MultiType(right_types) = right_dt {
-                        //Left not multi
-                        if inner {
-                            if right_types.contains(&left_basic_dt) {
-                                right_mappings = force_convert_multicol_to_single_col(
-                                    right_mappings,
-                                    v,
-                                    &left_basic_dt,
-                                );
-                                new_right_datatypes.insert(v.clone(), left_dt.clone());
-                            } else {
+                        match join_type {
+                            JoinType::Inner => {
+                                if right_types.contains(&left_basic_dt) {
+                                    right_mappings = force_convert_multicol_to_single_col(
+                                        right_mappings,
+                                        v,
+                                        &left_basic_dt,
+                                    );
+                                    new_right_datatypes.insert(v.clone(), left_dt.clone());
+                                } else {
+                                    left_mappings = left_mappings.filter(lit(false)).with_column(
+                                        lit(LiteralValue::Null)
+                                            .cast(RDFNodeType::None.polars_data_type())
+                                            .alias(v),
+                                    );
+                                    new_left_datatypes.insert(v.clone(), RDFNodeType::None);
+                                    right_mappings = right_mappings.filter(lit(false)).with_column(
+                                        lit(LiteralValue::Null)
+                                            .cast(RDFNodeType::None.polars_data_type())
+                                            .alias(v),
+                                    );
+                                    new_right_datatypes.insert(v.clone(), RDFNodeType::None);
+                                }
+                            }
+                            JoinType::Left => {
+                                if right_types.contains(&left_basic_dt) {
+                                    right_mappings = force_convert_multicol_to_single_col(
+                                        right_mappings,
+                                        v,
+                                        &left_basic_dt,
+                                    );
+                                    new_right_datatypes.insert(v.clone(), left_dt.clone());
+                                } else {
+                                    right_mappings = right_mappings.filter(lit(false)).with_column(
+                                        lit(LiteralValue::Null)
+                                            .cast(RDFNodeType::None.polars_data_type())
+                                            .alias(v),
+                                    );
+                                    new_right_datatypes.insert(v.clone(), RDFNodeType::None);
+                                }
+                            }
+                            _ => {
+                                todo!()
+                            }
+                        }
+                    } else { //Right not multi
+                        match join_type {
+                            JoinType::Inner => {
                                 left_mappings = left_mappings.filter(lit(false)).with_column(
                                     lit(LiteralValue::Null)
                                         .cast(RDFNodeType::None.polars_data_type())
@@ -372,15 +518,7 @@ pub fn create_join_compatible_solution_mappings(
                                 );
                                 new_right_datatypes.insert(v.clone(), RDFNodeType::None);
                             }
-                        } else {
-                            if right_types.contains(&left_basic_dt) {
-                                right_mappings = force_convert_multicol_to_single_col(
-                                    right_mappings,
-                                    v,
-                                    &left_basic_dt,
-                                );
-                                new_right_datatypes.insert(v.clone(), left_dt.clone());
-                            } else {
+                            JoinType::Left => {
                                 right_mappings = right_mappings.filter(lit(false)).with_column(
                                     lit(LiteralValue::Null)
                                         .cast(RDFNodeType::None.polars_data_type())
@@ -388,28 +526,9 @@ pub fn create_join_compatible_solution_mappings(
                                 );
                                 new_right_datatypes.insert(v.clone(), RDFNodeType::None);
                             }
-                        }
-                    } else {
-                        if inner {
-                            left_mappings = left_mappings.filter(lit(false)).with_column(
-                                lit(LiteralValue::Null)
-                                    .cast(RDFNodeType::None.polars_data_type())
-                                    .alias(v),
-                            );
-                            new_left_datatypes.insert(v.clone(), RDFNodeType::None);
-                            right_mappings = right_mappings.filter(lit(false)).with_column(
-                                lit(LiteralValue::Null)
-                                    .cast(RDFNodeType::None.polars_data_type())
-                                    .alias(v),
-                            );
-                            new_right_datatypes.insert(v.clone(), RDFNodeType::None);
-                        } else {
-                            right_mappings = right_mappings.filter(lit(false)).with_column(
-                                lit(LiteralValue::Null)
-                                    .cast(RDFNodeType::None.polars_data_type())
-                                    .alias(v),
-                            );
-                            new_right_datatypes.insert(v.clone(), RDFNodeType::None);
+                            _ => {
+                                todo!()
+                            }
                         }
                     }
                 }
@@ -418,6 +537,11 @@ pub fn create_join_compatible_solution_mappings(
     }
     left_datatypes.extend(new_left_datatypes);
     right_datatypes.extend(new_right_datatypes);
+    println!("Createi compat Left datatypes: {:?}", left_datatypes);
+    println!("Createi compat Right datatypes: {:?}", right_datatypes);
+    println!("Createi compat Left: {:?}", left_mappings.clone().collect().unwrap());
+    println!("Createi compat Right: {:?}", right_mappings.clone().collect().unwrap());
+
     (
         left_mappings,
         left_datatypes,
@@ -597,11 +721,12 @@ pub fn known_convert_lf_multicol_to_single(
 
 pub fn explode_multicols<'a>(
     mut mappings: LazyFrame,
-    multicols: &'a HashMap<String, RDFNodeType>,
-) -> (LazyFrame, HashMap<&'a String, (Vec<String>, Vec<String>)>) {
+    rdf_node_types: &HashMap<String, RDFNodeType>,
+) -> (LazyFrame, HashMap<String, (Vec<String>, Vec<String>)>) {
     let mut exprs = vec![];
     let mut out_map = HashMap::new();
-    for (c, t) in multicols {
+    let mut drop_cols = vec![];
+    for (c, t) in rdf_node_types {
         if let RDFNodeType::MultiType(types) = t {
             let inner_cols = all_multi_and_is_cols(types);
             let mut prefixed_inner_cols = vec![];
@@ -615,19 +740,20 @@ pub fn explode_multicols<'a>(
                 );
                 prefixed_inner_cols.push(prefixed_inner);
             }
-            out_map.insert(c, (inner_cols, prefixed_inner_cols));
+            out_map.insert(c.clone(), (inner_cols, prefixed_inner_cols));
+            drop_cols.push(c);
         } else {
-            panic!("Should not be called with columns that do not have multiple types")
+            //No action
         }
     }
     mappings = mappings.with_columns(exprs);
-    mappings = mappings.drop(multicols.keys());
+    mappings = mappings.drop(drop_cols);
     (mappings, out_map)
 }
 
 pub fn implode_multicolumns(
     mapping: LazyFrame,
-    map: HashMap<&String, (Vec<String>, Vec<String>)>,
+    map: HashMap<String, (Vec<String>, Vec<String>)>,
 ) -> LazyFrame {
     let mut structs = vec![];
     let mut drop_cols = vec![];
@@ -637,46 +763,35 @@ pub fn implode_multicolumns(
             struct_exprs.push(col(prefixed_inner_col).alias(inner_col));
         }
         drop_cols.extend(prefixed_inner_cols);
-        structs.push(as_struct(struct_exprs).alias(c));
+        structs.push(as_struct(struct_exprs).alias(&c));
     }
     mapping.with_columns(structs).drop(drop_cols)
 }
 
 pub fn join_workaround(
     mut left_mappings: LazyFrame,
-    left_datatypes: &HashMap<String, RDFNodeType>,
+    mut left_datatypes: HashMap<String, RDFNodeType>,
     mut right_mappings: LazyFrame,
-    right_datatypes: &HashMap<String, RDFNodeType>,
+    right_datatypes: HashMap<String, RDFNodeType>,
     join_type: JoinType,
-) -> LazyFrame {
+) -> SolutionMappings {
     assert!(matches!(join_type, JoinType::Left | JoinType::Inner));
-
+    println!("Left datatypes: {:?}", left_datatypes);
+    println!("Right datatypes: {:?}", right_datatypes);
     for c in left_datatypes.keys() {
         if right_datatypes.contains_key(c) {
-            left_mappings = lf_column_to_categorical(left_mappings, c, left_datatypes);
-            right_mappings = lf_column_to_categorical(right_mappings, c, right_datatypes);
+            left_mappings = lf_column_to_categorical(left_mappings, c, &left_datatypes);
+            right_mappings = lf_column_to_categorical(right_mappings, c, &right_datatypes);
         }
     }
 
-    let mut left_explode = HashMap::new();
-    let mut right_explode = HashMap::new();
-    for (c, t) in left_datatypes {
-        if let RDFNodeType::MultiType(..) = t {
-            left_explode.insert(c.clone(), t.clone());
-        }
-    }
-    for (c, t) in right_datatypes {
-        if let RDFNodeType::MultiType(..) = t {
-            right_explode.insert(c.clone(), t.clone());
-        }
-    }
-
-    let (mut left_mappings, left_exploded) = explode_multicols(left_mappings, &left_explode);
-    let (mut right_mappings, mut right_exploded) = explode_multicols(right_mappings, &right_explode);
+    let (mut left_mappings, left_exploded) = explode_multicols(left_mappings, &left_datatypes);
+    let (mut right_mappings, mut right_exploded) =
+        explode_multicols(right_mappings, &right_datatypes);
 
     let mut on = vec![];
     let mut no_join = false;
-    for (c, left_type) in left_datatypes {
+    for (c, left_type) in &left_datatypes {
         if let Some(right_type) = right_datatypes.get(c) {
             let intersection: Vec<_> =
                 if let Some((left_inner_columns, left_prefixed_inner_columns)) =
@@ -694,7 +809,7 @@ pub fn join_workaround(
                         let right_set: HashSet<_> = right_prefixed_inner_columns.iter().collect();
                         left_set.intersection(&right_set).map(|x| col(*x)).collect()
                     } else {
-                        panic!("Should have been fixed earlier")
+                        vec![]
                     }
                 } else if left_type == right_type {
                     vec![col(c)]
@@ -714,6 +829,11 @@ pub fn join_workaround(
         let dummycol = uuid::Uuid::new_v4().to_string();
         left_mappings = left_mappings.with_column(lit(false).alias(&dummycol));
         right_mappings = right_mappings.with_column(lit(true).alias(&dummycol));
+        let to_drop_right: Vec<_> = right_datatypes
+            .keys()
+            .filter(|k| left_datatypes.contains_key(*k))
+            .collect();
+        right_mappings = right_mappings.drop(to_drop_right);
         left_mappings = left_mappings.join(
             right_mappings,
             &[col(&dummycol)],
@@ -728,7 +848,7 @@ pub fn join_workaround(
     }
     let mut unified_exploded = HashMap::new();
     for (c, (mut left_inner_columns, mut left_prefixed_inner_columns)) in left_exploded {
-        if let Some((right_inner_columns, right_prefixed_inner_columns)) = right_exploded.remove(c)
+        if let Some((right_inner_columns, right_prefixed_inner_columns)) = right_exploded.remove(&c)
         {
             for (r, pr) in right_inner_columns
                 .into_iter()
@@ -745,90 +865,104 @@ pub fn join_workaround(
     unified_exploded.extend(right_exploded.into_iter());
 
     left_mappings = implode_multicolumns(left_mappings, unified_exploded);
-    left_mappings
+
+    for (c, dt) in right_datatypes {
+        if !left_datatypes.contains_key(&c) {
+            left_datatypes.insert(c, dt);
+        }
+    }
+    SolutionMappings::new(left_mappings, left_datatypes)
 }
 
-pub fn multi_columns_to_string_cols(mut lf:LazyFrame, rdf_node_types: &HashMap<String, RDFNodeType>) -> LazyFrame {
-    for (c,t) in rdf_node_types {
+pub fn unique_workaround(lf:LazyFrame, rdf_node_types: &HashMap<String, RDFNodeType>, subset:Option<Vec<String>>, stable:bool) -> LazyFrame {
+    let (mut lf, maps) = explode_multicols(lf, &rdf_node_types);
+    let unique_set = if let Some(subset) = subset {
+        let mut u = vec![];
+        for s in subset {
+            if let Some((_,cols)) = maps.get(&s) {
+                u.extend(cols.clone());
+            } else {
+                u.push(s);
+            }
+        }
+        Some(u)
+    } else {
+        None
+    };
+    if stable {
+        lf = lf.unique_stable(unique_set, UniqueKeepStrategy::Any);
+    } else {
+        lf = lf.unique(unique_set, UniqueKeepStrategy::Any);
+    }
+    lf = implode_multicolumns(lf, maps);
+    lf
+}
+
+pub fn group_by_workaround(lf:LazyFrame, rdf_node_types: &HashMap<String, RDFNodeType>, by:Vec<String>) -> (LazyGroupBy, HashMap<std::string::String, (Vec<std::string::String>, Vec<std::string::String>)>) {
+    let (mut lf, maps) = explode_multicols(lf, &rdf_node_types);
+    let mut new_by = vec![];
+    for b in by {
+        if let Some((_, cols)) = maps.get(&b) {
+            new_by.extend(cols.iter().map(|x|col(x)));
+        } else {
+            new_by.push(col(&b));
+        }
+    }
+    (lf.group_by(new_by), maps)
+}
+
+
+pub fn multi_columns_to_string_cols(
+    mut lf: LazyFrame,
+    rdf_node_types: &HashMap<String, RDFNodeType>,
+) -> LazyFrame {
+    for (c, t) in rdf_node_types {
         if let RDFNodeType::MultiType(types) = t {
             let mut to_coalesce = vec![];
             for t in types {
                 to_coalesce.push(match t {
-                    BaseRDFNodeType::IRI => {
-                        col(c).struct_().field_by_name(MULTI_IRI_DT).cast(DataType::String)
-                    }
-                    BaseRDFNodeType::BlankNode => {
-                        col(c).struct_().field_by_name(MULTI_BLANK_DT).cast(DataType::String)
-                    }
+                    BaseRDFNodeType::IRI => col(c)
+                        .struct_()
+                        .field_by_name(MULTI_IRI_DT)
+                        .cast(DataType::String),
+                    BaseRDFNodeType::BlankNode => col(c)
+                        .struct_()
+                        .field_by_name(MULTI_BLANK_DT)
+                        .cast(DataType::String),
                     BaseRDFNodeType::Literal(l) => {
                         if t.is_lang_string() {
-                            lit("\"") + col(c).struct_().field_by_name(LANG_STRING_VALUE_FIELD).cast(DataType::String) + lit("\"@") + col(c).struct_().field_by_name(LANG_STRING_LANG_FIELD).cast(DataType::String)
+                            lit("\"")
+                                + col(c)
+                                    .struct_()
+                                    .field_by_name(LANG_STRING_VALUE_FIELD)
+                                    .cast(DataType::String)
+                                + lit("\"@")
+                                + col(c)
+                                    .struct_()
+                                    .field_by_name(LANG_STRING_LANG_FIELD)
+                                    .cast(DataType::String)
                         } else if l.as_ref() == xsd::STRING {
-                            lit("\"") + col(c).struct_().field_by_name(&non_multi_type_string(t)).cast(DataType::String) + lit("\"")
+                            lit("\"")
+                                + col(c)
+                                    .struct_()
+                                    .field_by_name(&non_multi_type_string(t))
+                                    .cast(DataType::String)
+                                + lit("\"")
                         } else {
-                            lit("\"") + col(c).struct_().field_by_name(&non_multi_type_string(t)).cast(DataType::String) + lit("\"^^") + lit(l.to_string())
+                            lit("\"")
+                                + col(c)
+                                    .struct_()
+                                    .field_by_name(&non_multi_type_string(t))
+                                    .cast(DataType::String)
+                                + lit("\"^^")
+                                + lit(l.to_string())
                         }
                     }
-                    BaseRDFNodeType::None => {lit(LiteralValue::Null).cast(DataType::String)}
+                    BaseRDFNodeType::None => lit(LiteralValue::Null).cast(DataType::String),
                 })
             }
             lf = lf.with_column(coalesce(to_coalesce.as_slice()).alias(c));
         }
     }
     lf
-}
-
-pub fn lf_printer(lf: &LazyFrame) {
-    let df = lf_destruct(lf);
-    println!("DF: {}", df);
-}
-
-pub fn lf_destruct(lf: &LazyFrame) -> DataFrame {
-    todo!()
-    // let df = lf.clone().collect().unwrap();
-    // let colnames: Vec<_> = df
-    //     .get_column_names()
-    //     .iter()
-    //     .map(|x| x.to_string())
-    //     .collect();
-    // let mut series_vec = vec![];
-    // for c in colnames {
-    //     let ser = df.column(&c).unwrap();
-    //     if let DataType::Categorical(_) = ser.dtype() {
-    //         series_vec.push(ser.cast(&DataType::String).unwrap());
-    //     } else if let DataType::Struct(fields) = ser.dtype() {
-    //         if fields.len() == 3 {
-    //             let mut tmp_lf = DataFrame::new(vec![ser.clone()]).unwrap().lazy();
-    //             let value_name = format!("{}_{}", c, MULTI_VALUE_COL);
-    //             let lang_name = format!("{}_{}", c, MULTI_LANG_COL);
-    //             let dt_name = format!("{}_{}", c, MULTI_DT_COL);
-    //             tmp_lf = tmp_lf.with_columns([
-    //                 col(&c)
-    //                     .struct_()
-    //                     .field_by_name(MULTI_VALUE_COL)
-    //                     .cast(DataType::String)
-    //                     .alias(&value_name),
-    //                 col(&c)
-    //                     .struct_()
-    //                     .field_by_name(MULTI_LANG_COL)
-    //                     .cast(DataType::String)
-    //                     .alias(&lang_name),
-    //                 col(&c)
-    //                     .struct_()
-    //                     .field_by_name(MULTI_DT_COL)
-    //                     .cast(DataType::String)
-    //                     .alias(&dt_name),
-    //             ]);
-    //             let mut tmp_df = tmp_lf.collect().unwrap();
-    //             series_vec.push(tmp_df.drop_in_place(&value_name).unwrap());
-    //             series_vec.push(tmp_df.drop_in_place(&lang_name).unwrap());
-    //             series_vec.push(tmp_df.drop_in_place(&dt_name).unwrap());
-    //         } else {
-    //             series_vec.push(ser.clone());
-    //         }
-    //     } else {
-    //         series_vec.push(ser.clone());
-    //     }
-    // }
-    // DataFrame::new(series_vec).unwrap()
 }
