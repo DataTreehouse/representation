@@ -32,7 +32,6 @@ pub fn df_as_result(df: DataFrame, dtypes: &HashMap<String, RDFNodeType>) -> Que
     let height = df.height();
     for (k, v) in dtypes {
         if let Ok(ser) = df.column(k) {
-            println!("ser: {}", ser);
             //TODO: Perhaps correct this upstream?
             variables.push(Variable::new_unchecked(k));
             let terms: Vec<_> = match v {
@@ -97,8 +96,6 @@ pub fn df_as_result(df: DataFrame, dtypes: &HashMap<String, RDFNodeType>) -> Que
             all_terms.push(terms);
         }
     }
-    println!("DF: {}", df);
-    println!("terms: {:?}", all_terms);
     let mut solns = vec![];
     for _i in 0..height {
         let mut soln = vec![];
