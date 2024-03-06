@@ -1,9 +1,7 @@
 use crate::solution_mapping::SolutionMappings;
 use crate::{BaseRDFNodeType, RDFNodeType, LANG_STRING_LANG_FIELD, LANG_STRING_VALUE_FIELD};
 use oxrdf::vocab::{rdf, xsd};
-use polars::prelude::{
-    as_struct, coalesce, col, lit, Expr, IntoLazy, JoinType, LazyFrame, LiteralValue, LazyGroupBy
-};
+use polars::prelude::{as_struct, coalesce, col, lit, Expr, IntoLazy, JoinType, LazyFrame, LiteralValue, LazyGroupBy, JoinArgs};
 use polars_core::datatypes::CategoricalOrdering;
 use polars_core::frame::{DataFrame, UniqueKeepStrategy};
 use polars_core::prelude::DataType;
@@ -344,6 +342,9 @@ pub fn create_join_compatible_solution_mappings(
                                     for c in &all_cols {
                                         struct_cols
                                             .push(col(v).struct_().field_by_name(c).alias(c));
+                                        let is_col_name = create_multi_has_this_type_column_name(c);
+                                        struct_cols
+                                            .push(col(v).struct_().field_by_name(&is_col_name));
                                     }
 
                                     left_mappings = left_mappings
@@ -396,7 +397,10 @@ pub fn create_join_compatible_solution_mappings(
                                     let mut struct_cols = vec![];
                                     for c in &all_cols {
                                         struct_cols
-                                            .push(col(v).struct_().field_by_name(c).alias(c));
+                                            .push(col(v).struct_().field_by_name(c));
+                                        let is_col_name = create_multi_has_this_type_column_name(c);
+                                        struct_cols
+                                            .push(col(v).struct_().field_by_name(&is_col_name));
                                     }
 
                                     right_mappings = right_mappings
@@ -421,7 +425,7 @@ pub fn create_join_compatible_solution_mappings(
                                     left_mappings = force_convert_multicol_to_single_col(
                                         left_mappings,
                                         v,
-                                        &BaseRDFNodeType::from_rdf_node_type(right_dt),
+                                        &base_right,
                                     );
                                     new_left_datatypes.insert(v.clone(), right_dt.clone());
                                 } else {
@@ -440,7 +444,10 @@ pub fn create_join_compatible_solution_mappings(
                                 }
                             }
                             JoinType::Left => {
-                                if !left_types.contains(&base_right) {
+                                if left_types.contains(&base_right) {
+                                    right_mappings = convert_lf_col_to_multitype(right_mappings, v, right_dt);
+                                    new_right_datatypes.insert(v.clone(), RDFNodeType::MultiType(vec![base_right]));
+                                } else {
                                     right_mappings = right_mappings.filter(lit(false)).with_column(
                                         lit(LiteralValue::Null)
                                             .cast(RDFNodeType::None.polars_data_type())
@@ -555,6 +562,7 @@ pub fn compress_actual_multitypes(
     rdf_node_types: HashMap<String, RDFNodeType>,
 ) -> (DataFrame, HashMap<String, RDFNodeType>) {
     println!("Rdf node types {:?}", rdf_node_types);
+    println!("DF: {}", df);
     let mut updated_types = HashMap::new();
     let mut col_exprs = vec![];
     let mut to_single = vec![];
@@ -596,7 +604,7 @@ pub fn compress_actual_multitypes(
                 } else {
                     let all_cols_exprs: Vec<_> = all_multi_and_is_cols(&keep_types)
                         .into_iter()
-                        .map(|x| col(&x))
+                        .map(|x|col(&c).struct_().field_by_name(&x))
                         .collect();
                     col_exprs.push(as_struct(all_cols_exprs).alias(&c));
                     updated_types.insert(c, RDFNodeType::MultiType(keep_types));
@@ -618,6 +626,8 @@ pub fn compress_actual_multitypes(
         lf = lf.with_columns(col_exprs);
     }
     df = lf.collect().unwrap();
+    println!("updated node types {:?}", updated_types);
+    println!("DF: {}", df);
     (df, updated_types)
 }
 
@@ -799,13 +809,6 @@ pub fn join_workaround(
                 {
                     if let Some((_, right_prefixed_inner_columns)) = right_exploded.get(c) {
                         let mut left_set: HashSet<_> = left_prefixed_inner_columns.iter().collect();
-                        if let Some(pos) =
-                            left_inner_columns.iter().position(|x| x == MULTI_NONE_DT)
-                        {
-                            let removed =
-                                left_set.remove(left_prefixed_inner_columns.get(pos).unwrap());
-                            assert!(removed);
-                        }
                         let right_set: HashSet<_> = right_prefixed_inner_columns.iter().collect();
                         left_set.intersection(&right_set).map(|x| col(*x)).collect()
                     } else {
@@ -826,6 +829,7 @@ pub fn join_workaround(
     }
 
     if no_join {
+        println!("No join");
         let dummycol = uuid::Uuid::new_v4().to_string();
         left_mappings = left_mappings.with_column(lit(false).alias(&dummycol));
         right_mappings = right_mappings.with_column(lit(true).alias(&dummycol));
@@ -842,7 +846,16 @@ pub fn join_workaround(
         );
         left_mappings = left_mappings.drop([dummycol]);
     } else if !on.is_empty() {
-        left_mappings = left_mappings.join(right_mappings, &on, &on, join_type.into());
+        println!("Right before join left: {}", left_mappings.clone().collect().unwrap());
+        println!("Right before join right: {}", right_mappings.clone().collect().unwrap());
+        let join_args = JoinArgs{
+            how: join_type,
+            validation: Default::default(),
+            suffix: None,
+            slice: None,
+            join_nulls: true,
+        };
+        left_mappings = left_mappings.join(right_mappings, &on, &on, join_args);
     } else {
         left_mappings = left_mappings.cross_join(right_mappings);
     }
@@ -899,7 +912,14 @@ pub fn unique_workaround(lf:LazyFrame, rdf_node_types: &HashMap<String, RDFNodeT
 }
 
 pub fn group_by_workaround(lf:LazyFrame, rdf_node_types: &HashMap<String, RDFNodeType>, by:Vec<String>) -> (LazyGroupBy, HashMap<std::string::String, (Vec<std::string::String>, Vec<std::string::String>)>) {
-    let (mut lf, maps) = explode_multicols(lf, &rdf_node_types);
+    let mut to_explode = HashMap::new();
+    for c in &by {
+        let t = rdf_node_types.get(c).expect(c);
+        if let RDFNodeType::MultiType(..) = t {
+            to_explode.insert(c.clone(), t.clone());
+        }
+    }
+    let (mut lf, maps) = explode_multicols(lf, &to_explode);
     let mut new_by = vec![];
     for b in by {
         if let Some((_, cols)) = maps.get(&b) {
