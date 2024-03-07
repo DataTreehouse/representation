@@ -7,7 +7,7 @@ pub mod sparql_to_polars;
 
 use oxrdf::vocab::{rdf, xsd};
 use oxrdf::{BlankNode, NamedNode, NamedNodeRef, NamedOrBlankNode, Term};
-use polars_core::prelude::{DataType, TimeUnit};
+use polars_core::prelude::{DataType, Field, TimeUnit};
 use spargebra::term::TermPattern;
 use std::fmt::{Display, Formatter};
 use thiserror::*;
@@ -77,6 +77,29 @@ impl BaseRDFNodeType {
             BaseRDFNodeType::BlankNode => RDFNodeType::BlankNode,
             BaseRDFNodeType::Literal(l) => RDFNodeType::Literal(l.clone()),
             BaseRDFNodeType::None => RDFNodeType::None,
+        }
+    }
+
+    pub fn polars_data_type(&self) -> DataType {
+        match self {
+            BaseRDFNodeType::IRI => DataType::String,
+            BaseRDFNodeType::BlankNode => DataType::String,
+            BaseRDFNodeType::Literal(l) => match l.as_ref() {
+                xsd::STRING => DataType::String,
+                xsd::UNSIGNED_INT => DataType::UInt32,
+                xsd::UNSIGNED_LONG => DataType::UInt64,
+                xsd::INTEGER | xsd::LONG => DataType::Int64,
+                xsd::INT => DataType::Int32,
+                xsd::DOUBLE | xsd::DECIMAL => DataType::Float64,
+                xsd::FLOAT => DataType::Float32,
+                xsd::BOOLEAN => DataType::Boolean,
+                rdf::LANG_STRING => DataType::Struct(vec![Field::new(LANG_STRING_VALUE_FIELD, DataType::String), Field::new(LANG_STRING_LANG_FIELD, DataType::String)]),
+                xsd::DATE_TIME => DataType::Datetime(TimeUnit::Nanoseconds, None),
+                n => {
+                    todo!("Datatype {} not supported yet", n)
+                }
+            },
+            BaseRDFNodeType::None => DataType::Boolean,
         }
     }
 }
@@ -163,20 +186,7 @@ impl RDFNodeType {
 
     pub fn is_numeric(&self) -> bool {
         match self {
-            RDFNodeType::Literal(l) => {
-                matches!(
-                    l.as_ref(),
-                    xsd::INT
-                        | xsd::BYTE
-                        | xsd::SHORT
-                        | xsd::INTEGER
-                        | xsd::UNSIGNED_BYTE
-                        | xsd::UNSIGNED_INT
-                        | xsd::DECIMAL
-                        | xsd::FLOAT
-                        | xsd::DOUBLE
-                )
-            }
+            RDFNodeType::Literal(l) => literal_is_numeric(l.as_ref()),
             _ => false,
         }
     }
@@ -199,29 +209,6 @@ impl RDFNodeType {
             RDFNodeType::MultiType(..) => {
                 panic!()
             }
-        }
-    }
-
-    pub fn polars_data_type(&self) -> DataType {
-        match self {
-            RDFNodeType::IRI => DataType::String,
-            RDFNodeType::BlankNode => DataType::String,
-            RDFNodeType::Literal(l) => match l.as_ref() {
-                xsd::STRING => DataType::String,
-                xsd::UNSIGNED_INT => DataType::UInt32,
-                xsd::UNSIGNED_LONG => DataType::UInt64,
-                xsd::INTEGER | xsd::LONG => DataType::Int64,
-                xsd::INT => DataType::Int32,
-                xsd::DOUBLE | xsd::DECIMAL => DataType::Float64,
-                xsd::FLOAT => DataType::Float32,
-                xsd::BOOLEAN => DataType::Boolean,
-                xsd::DATE_TIME => DataType::Datetime(TimeUnit::Nanoseconds, None),
-                n => {
-                    todo!("Datatype {} not supported yet", n)
-                }
-            },
-            RDFNodeType::None => DataType::Boolean,
-            RDFNodeType::MultiType(..) => todo!(),
         }
     }
 }
@@ -247,4 +234,31 @@ pub fn owned_term_to_named_node(t: Term) -> Option<NamedNode> {
         Term::NamedNode(nn) => Some(nn),
         _ => None,
     }
+}
+
+pub fn literal_is_numeric(l: NamedNodeRef) -> bool {
+    matches!(
+        l,
+        xsd::INT
+            | xsd::BYTE
+            | xsd::SHORT
+            | xsd::INTEGER
+            | xsd::UNSIGNED_BYTE
+            | xsd::UNSIGNED_INT
+            | xsd::DECIMAL
+            | xsd::FLOAT
+            | xsd::DOUBLE
+    )
+}
+
+pub fn literal_is_boolean(l: NamedNodeRef) -> bool {
+    matches!(l, xsd::BOOLEAN)
+}
+
+pub fn literal_is_datetime(l: NamedNodeRef) -> bool {
+    matches!(l, xsd::DATE_TIME)
+}
+
+pub fn literal_is_string(l: NamedNodeRef) -> bool {
+    matches!(l, xsd::STRING)
 }

@@ -370,7 +370,7 @@ pub fn create_join_compatible_solution_mappings(
                                 if right_keep.is_empty() {
                                     right_mappings = right_mappings.filter(lit(false)).with_column(
                                         lit(LiteralValue::Null)
-                                            .cast(RDFNodeType::None.polars_data_type())
+                                            .cast(BaseRDFNodeType::None.polars_data_type())
                                             .alias(v),
                                     );
                                     new_right_datatypes.insert(v.to_string(), RDFNodeType::None);
@@ -429,13 +429,13 @@ pub fn create_join_compatible_solution_mappings(
                                 } else {
                                     left_mappings = left_mappings.filter(lit(false)).with_column(
                                         lit(LiteralValue::Null)
-                                            .cast(RDFNodeType::None.polars_data_type())
+                                            .cast(BaseRDFNodeType::None.polars_data_type())
                                             .alias(v),
                                     );
                                     new_left_datatypes.insert(v.clone(), RDFNodeType::None);
                                     right_mappings = right_mappings.filter(lit(false)).with_column(
                                         lit(LiteralValue::Null)
-                                            .cast(RDFNodeType::None.polars_data_type())
+                                            .cast(BaseRDFNodeType::None.polars_data_type())
                                             .alias(v),
                                     );
                                     new_right_datatypes.insert(v.clone(), RDFNodeType::None);
@@ -452,7 +452,7 @@ pub fn create_join_compatible_solution_mappings(
                                 } else {
                                     right_mappings = right_mappings.filter(lit(false)).with_column(
                                         lit(LiteralValue::Null)
-                                            .cast(RDFNodeType::None.polars_data_type())
+                                            .cast(BaseRDFNodeType::None.polars_data_type())
                                             .alias(v),
                                     );
                                     new_right_datatypes.insert(v.clone(), RDFNodeType::None);
@@ -479,13 +479,13 @@ pub fn create_join_compatible_solution_mappings(
                                 } else {
                                     left_mappings = left_mappings.filter(lit(false)).with_column(
                                         lit(LiteralValue::Null)
-                                            .cast(RDFNodeType::None.polars_data_type())
+                                            .cast(BaseRDFNodeType::None.polars_data_type())
                                             .alias(v),
                                     );
                                     new_left_datatypes.insert(v.clone(), RDFNodeType::None);
                                     right_mappings = right_mappings.filter(lit(false)).with_column(
                                         lit(LiteralValue::Null)
-                                            .cast(RDFNodeType::None.polars_data_type())
+                                            .cast(BaseRDFNodeType::None.polars_data_type())
                                             .alias(v),
                                     );
                                     new_right_datatypes.insert(v.clone(), RDFNodeType::None);
@@ -502,7 +502,7 @@ pub fn create_join_compatible_solution_mappings(
                                 } else {
                                     right_mappings = right_mappings.filter(lit(false)).with_column(
                                         lit(LiteralValue::Null)
-                                            .cast(RDFNodeType::None.polars_data_type())
+                                            .cast(BaseRDFNodeType::None.polars_data_type())
                                             .alias(v),
                                     );
                                     new_right_datatypes.insert(v.clone(), RDFNodeType::None);
@@ -518,13 +518,13 @@ pub fn create_join_compatible_solution_mappings(
                             JoinType::Inner => {
                                 left_mappings = left_mappings.filter(lit(false)).with_column(
                                     lit(LiteralValue::Null)
-                                        .cast(RDFNodeType::None.polars_data_type())
+                                        .cast(BaseRDFNodeType::None.polars_data_type())
                                         .alias(v),
                                 );
                                 new_left_datatypes.insert(v.clone(), RDFNodeType::None);
                                 right_mappings = right_mappings.filter(lit(false)).with_column(
                                     lit(LiteralValue::Null)
-                                        .cast(RDFNodeType::None.polars_data_type())
+                                        .cast(BaseRDFNodeType::None.polars_data_type())
                                         .alias(v),
                                 );
                                 new_right_datatypes.insert(v.clone(), RDFNodeType::None);
@@ -532,7 +532,7 @@ pub fn create_join_compatible_solution_mappings(
                             JoinType::Left => {
                                 right_mappings = right_mappings.filter(lit(false)).with_column(
                                     lit(LiteralValue::Null)
-                                        .cast(RDFNodeType::None.polars_data_type())
+                                        .cast(BaseRDFNodeType::None.polars_data_type())
                                         .alias(v),
                                 );
                                 new_right_datatypes.insert(v.clone(), RDFNodeType::None);
@@ -591,7 +591,7 @@ pub fn compress_actual_multitypes(
                 if keep_types.is_empty() {
                     col_exprs.push(
                         lit(LiteralValue::Null)
-                            .cast(RDFNodeType::None.polars_data_type())
+                            .cast(BaseRDFNodeType::None.polars_data_type())
                             .alias(&c),
                     );
                     updated_types.insert(c, RDFNodeType::None);
