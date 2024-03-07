@@ -435,7 +435,7 @@ fn maintains_full_downward_scope(path_entry: &PathEntry) -> bool {
         PathEntry::FunctionCall(_) => true,
         PathEntry::AggregationOperation => true,
         PathEntry::OrderingOperation => true,
-        PathEntry::PathRewrite => false
+        PathEntry::PathRewrite => false,
     }
 }
 

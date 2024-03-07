@@ -1,13 +1,13 @@
 pub mod literals;
 pub mod multitype;
+pub mod polars_to_sparql;
+pub mod query_context;
 pub mod solution_mapping;
 pub mod sparql_to_polars;
-pub mod query_context;
-pub mod polars_to_sparql;
 
 use oxrdf::vocab::{rdf, xsd};
 use oxrdf::{BlankNode, NamedNode, NamedNodeRef, NamedOrBlankNode, Term};
-use polars_core::prelude::{DataType, TimeUnit};
+use polars_core::prelude::{DataType, Field, TimeUnit};
 use spargebra::term::TermPattern;
 use std::fmt::{Display, Formatter};
 use thiserror::*;
@@ -18,8 +18,12 @@ pub enum RepresentationError {
     InvalidLiteralError(String),
 }
 
-pub const LANG_STRING_VALUE_FIELD: &str = "v";
+pub const LANG_STRING_VALUE_FIELD: &str = "<http://www.w3.org/1999/02/22-rdf-syntax-ns#langString>";
 pub const LANG_STRING_LANG_FIELD: &str = "l";
+
+const RDF_NODE_TYPE_IRI: &str = "IRI";
+const RDF_NODE_TYPE_BLANK_NODE: &str = "Blank";
+const RDF_NODE_TYPE_NONE: &str = "None";
 
 #[derive(PartialEq, Clone)]
 pub enum TripleType {
@@ -35,26 +39,108 @@ pub enum RDFNodeType {
     BlankNode,
     Literal(NamedNode),
     None,
-    MultiType,
+    MultiType(Vec<BaseRDFNodeType>),
+}
+
+#[derive(Debug, Clone, Ord, PartialOrd, PartialEq, Eq, Hash)]
+pub enum BaseRDFNodeType {
+    IRI,
+    BlankNode,
+    Literal(NamedNode),
+    None,
+}
+
+impl BaseRDFNodeType {
+    pub fn from_rdf_node_type(r: &RDFNodeType) -> BaseRDFNodeType {
+        match r {
+            RDFNodeType::IRI => BaseRDFNodeType::IRI,
+            RDFNodeType::BlankNode => BaseRDFNodeType::BlankNode,
+            RDFNodeType::Literal(l) => BaseRDFNodeType::Literal(l.clone()),
+            RDFNodeType::None => BaseRDFNodeType::None,
+            RDFNodeType::MultiType(_) => {
+                panic!()
+            }
+        }
+    }
+
+    pub fn is_lang_string(&self) -> bool {
+        if let BaseRDFNodeType::Literal(l) = self {
+            l.as_ref() == rdf::LANG_STRING
+        } else {
+            false
+        }
+    }
+
+    pub fn as_rdf_node_type(&self) -> RDFNodeType {
+        match self {
+            BaseRDFNodeType::IRI => RDFNodeType::IRI,
+            BaseRDFNodeType::BlankNode => RDFNodeType::BlankNode,
+            BaseRDFNodeType::Literal(l) => RDFNodeType::Literal(l.clone()),
+            BaseRDFNodeType::None => RDFNodeType::None,
+        }
+    }
+
+    pub fn polars_data_type(&self) -> DataType {
+        match self {
+            BaseRDFNodeType::IRI => DataType::String,
+            BaseRDFNodeType::BlankNode => DataType::String,
+            BaseRDFNodeType::Literal(l) => match l.as_ref() {
+                xsd::STRING => DataType::String,
+                xsd::UNSIGNED_INT => DataType::UInt32,
+                xsd::UNSIGNED_LONG => DataType::UInt64,
+                xsd::INTEGER | xsd::LONG => DataType::Int64,
+                xsd::INT => DataType::Int32,
+                xsd::DOUBLE | xsd::DECIMAL => DataType::Float64,
+                xsd::FLOAT => DataType::Float32,
+                xsd::BOOLEAN => DataType::Boolean,
+                rdf::LANG_STRING => DataType::Struct(vec![Field::new(LANG_STRING_VALUE_FIELD, DataType::String), Field::new(LANG_STRING_LANG_FIELD, DataType::String)]),
+                xsd::DATE_TIME => DataType::Datetime(TimeUnit::Nanoseconds, None),
+                n => {
+                    todo!("Datatype {} not supported yet", n)
+                }
+            },
+            BaseRDFNodeType::None => DataType::Boolean,
+        }
+    }
+}
+
+impl Display for BaseRDFNodeType {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BaseRDFNodeType::IRI => {
+                write!(f, "{RDF_NODE_TYPE_IRI}")
+            }
+            BaseRDFNodeType::BlankNode => {
+                write!(f, "{RDF_NODE_TYPE_BLANK_NODE}")
+            }
+            BaseRDFNodeType::Literal(l) => {
+                write!(f, "{}", l)
+            }
+            BaseRDFNodeType::None => {
+                write!(f, "{RDF_NODE_TYPE_NONE}")
+            }
+        }
+    }
 }
 
 impl Display for RDFNodeType {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             RDFNodeType::IRI => {
-                write!(f, "IRI")
+                write!(f, "{RDF_NODE_TYPE_IRI}")
             }
             RDFNodeType::BlankNode => {
-                write!(f, "Blank")
+                write!(f, "{RDF_NODE_TYPE_BLANK_NODE}")
             }
             RDFNodeType::Literal(l) => {
                 write!(f, "{}", l)
             }
             RDFNodeType::None => {
-                write!(f, "None")
+                write!(f, "{RDF_NODE_TYPE_NONE}")
             }
-            RDFNodeType::MultiType => {
-                write!(f, "MultiType")
+            RDFNodeType::MultiType(types) => {
+                let type_strings: Vec<_> = types.iter().map(|x| x.to_string()).collect();
+                write!(f, "Multiple({})", type_strings.join(", "))
             }
         }
     }
@@ -73,11 +159,11 @@ impl RDFNodeType {
         }
     }
 
-    pub fn union(&self, other: &RDFNodeType) -> RDFNodeType {
-        if self == other {
-            self.clone()
+    pub fn is_lang_string(&self) -> bool {
+        if let RDFNodeType::Literal(l) = self {
+            l.as_ref() == rdf::LANG_STRING
         } else {
-            RDFNodeType::MultiType
+            false
         }
     }
 
@@ -100,20 +186,7 @@ impl RDFNodeType {
 
     pub fn is_numeric(&self) -> bool {
         match self {
-            RDFNodeType::Literal(l) => {
-                matches!(
-                    l.as_ref(),
-                    xsd::INT
-                        | xsd::BYTE
-                        | xsd::SHORT
-                        | xsd::INTEGER
-                        | xsd::UNSIGNED_BYTE
-                        | xsd::UNSIGNED_INT
-                        | xsd::DECIMAL
-                        | xsd::FLOAT
-                        | xsd::DOUBLE
-                )
-            }
+            RDFNodeType::Literal(l) => literal_is_numeric(l.as_ref()),
             _ => false,
         }
     }
@@ -133,32 +206,9 @@ impl RDFNodeType {
             RDFNodeType::None => {
                 panic!()
             }
-            RDFNodeType::MultiType => {
+            RDFNodeType::MultiType(..) => {
                 panic!()
             }
-        }
-    }
-
-    pub fn polars_data_type(&self) -> DataType {
-        match self {
-            RDFNodeType::IRI => DataType::Utf8,
-            RDFNodeType::BlankNode => DataType::Utf8,
-            RDFNodeType::Literal(l) => match l.as_ref() {
-                xsd::STRING => DataType::Utf8,
-                xsd::UNSIGNED_INT => DataType::UInt32,
-                xsd::UNSIGNED_LONG => DataType::UInt64,
-                xsd::INTEGER | xsd::LONG => DataType::Int64,
-                xsd::INT => DataType::Int32,
-                xsd::DOUBLE | xsd::DECIMAL => DataType::Float64,
-                xsd::FLOAT => DataType::Float32,
-                xsd::BOOLEAN => DataType::Boolean,
-                xsd::DATE_TIME => DataType::Datetime(TimeUnit::Nanoseconds, None),
-                n => {
-                    todo!("Datatype {} not supported yet", n)
-                }
-            },
-            RDFNodeType::None => DataType::Null,
-            RDFNodeType::MultiType => todo!(),
         }
     }
 }
@@ -184,4 +234,31 @@ pub fn owned_term_to_named_node(t: Term) -> Option<NamedNode> {
         Term::NamedNode(nn) => Some(nn),
         _ => None,
     }
+}
+
+pub fn literal_is_numeric(l: NamedNodeRef) -> bool {
+    matches!(
+        l,
+        xsd::INT
+            | xsd::BYTE
+            | xsd::SHORT
+            | xsd::INTEGER
+            | xsd::UNSIGNED_BYTE
+            | xsd::UNSIGNED_INT
+            | xsd::DECIMAL
+            | xsd::FLOAT
+            | xsd::DOUBLE
+    )
+}
+
+pub fn literal_is_boolean(l: NamedNodeRef) -> bool {
+    matches!(l, xsd::BOOLEAN)
+}
+
+pub fn literal_is_datetime(l: NamedNodeRef) -> bool {
+    matches!(l, xsd::DATE_TIME)
+}
+
+pub fn literal_is_string(l: NamedNodeRef) -> bool {
+    matches!(l, xsd::STRING)
 }

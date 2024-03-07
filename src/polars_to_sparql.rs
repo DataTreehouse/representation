@@ -1,12 +1,17 @@
-use std::collections::HashMap;
-use crate::{literal_iri_to_namednode, RDFNodeType, LANG_STRING_LANG_FIELD, LANG_STRING_VALUE_FIELD, literal_blanknode_to_blanknode};
+use crate::multitype::all_multi_main_cols;
+use crate::{
+    literal_blanknode_to_blanknode, literal_iri_to_namednode, BaseRDFNodeType, RDFNodeType,
+    LANG_STRING_LANG_FIELD, LANG_STRING_VALUE_FIELD,
+};
 use oxrdf::vocab::{rdf, xsd};
 use oxrdf::{Literal, NamedNodeRef, Variable};
-use polars::export::rayon::iter::{ParallelIterator};
+use polars::export::rayon::iter::ParallelIterator;
+use polars::prelude::{as_struct, col, IntoLazy};
 use polars_core::frame::DataFrame;
-use polars_core::prelude::{DataType};
+use polars_core::prelude::{DataType, Series};
 use spargebra::term::Term;
-use crate::multitype::{MULTI_BLANK_DT, MULTI_DT_COL, MULTI_IRI_DT, MULTI_LANG_COL, MULTI_VALUE_COL};
+use std::collections::HashMap;
+use std::vec::IntoIter;
 
 //From sparesults, need public fields.
 #[derive(Debug)]
@@ -24,142 +29,75 @@ pub fn df_as_result(df: DataFrame, dtypes: &HashMap<String, RDFNodeType>) -> Que
     }
     let mut all_terms = vec![];
     let mut variables = vec![];
+    let height = df.height();
     for (k, v) in dtypes {
-        if let Ok(ser) = df.column(k) { //TODO: Perhaps correct this upstream?
+        if let Ok(ser) = df.column(k) {
+            //TODO: Perhaps correct this upstream?
             variables.push(Variable::new_unchecked(k));
             let terms: Vec<_> = match v {
-                RDFNodeType::IRI => ser
-                    .cast(&DataType::Utf8)
-                    .unwrap()
-                    .utf8()
-                    .unwrap()
-                    .par_iter()
-                    .map(|x| x.map(|x| Term::NamedNode(literal_iri_to_namednode(x))))
-                    .collect(),
-                RDFNodeType::BlankNode => ser
-                    .cast(&DataType::Utf8)
-                    .unwrap()
-                    .utf8()
-                    .unwrap()
-                    .par_iter()
-                    .map(|x| x.map(|x| Term::BlankNode(literal_blanknode_to_blanknode(x))))
-                    .collect(),
-                RDFNodeType::Literal(l) => match l.as_ref() {
-                    rdf::LANG_STRING => {
-                        let value_ser = ser
-                            .struct_()
+                RDFNodeType::None
+                | RDFNodeType::IRI
+                | RDFNodeType::BlankNode
+                | RDFNodeType::Literal(..) => basic_rdf_node_type_series_to_term_vec(
+                    ser,
+                    &BaseRDFNodeType::from_rdf_node_type(v),
+                ),
+                RDFNodeType::MultiType(types) => {
+                    let mut iters: Vec<IntoIter<Option<Term>>> = vec![];
+                    for (t, colname) in types.iter().zip(all_multi_main_cols(types)) {
+                        let v = if t.is_lang_string() {
+                            let mut lf = DataFrame::new(vec![
+                                ser.struct_()
+                                    .unwrap()
+                                    .field_by_name(LANG_STRING_VALUE_FIELD)
+                                    .unwrap()
+                                    .clone(),
+                                ser.struct_()
+                                    .unwrap()
+                                    .field_by_name(LANG_STRING_LANG_FIELD)
+                                    .unwrap()
+                                    .clone(),
+                            ])
                             .unwrap()
-                            .field_by_name(LANG_STRING_VALUE_FIELD)
-                            .unwrap();
-                        let value_iter = value_ser.utf8().unwrap().into_iter();
-                        let lang_ser = ser
-                            .struct_()
-                            .unwrap()
-                            .field_by_name(LANG_STRING_LANG_FIELD)
-                            .unwrap();
-                        let lang_iter = lang_ser.utf8().unwrap().into_iter();
-                        value_iter
-                            .zip(lang_iter)
-                            .map(|(value, lang)| {
-                                if let Some(value) = value {
-                                    if let Some(lang) = lang {
-                                        Some(Term::Literal(
-                                            Literal::new_language_tagged_literal_unchecked(value, lang),
-                                        ))
-                                    } else {
-                                        panic!()
-                                    }
-                                } else {
-                                    None
-                                }
-                            })
-                            .collect()
+                            .lazy();
+                            lf = lf.with_column(
+                                as_struct(vec![
+                                    col(LANG_STRING_LANG_FIELD),
+                                    col(LANG_STRING_VALUE_FIELD),
+                                ])
+                                .alias(&colname),
+                            );
+                            let df = lf.collect();
+                            let ser = df.unwrap().drop_in_place(&colname).unwrap();
+                            basic_rdf_node_type_series_to_term_vec(&ser, t)
+                        } else {
+                            basic_rdf_node_type_series_to_term_vec(
+                                &ser.struct_().unwrap().field_by_name(&colname).unwrap(),
+                                t,
+                            )
+                        };
+                        iters.push(v.into_iter())
                     }
-                    xsd::STRING => ser
-                        .cast(&DataType::Utf8)
-                        .unwrap()
-                        .utf8()
-                        .unwrap()
-                        .par_iter()
-                        .map(|x| x.map(|x| Term::Literal(Literal::new_simple_literal(x))))
-                        .collect(),
-                    dt => ser
-                        .cast(&DataType::Utf8)
-                        .unwrap()
-                        .utf8()
-                        .unwrap()
-                        .par_iter()
-                        .map(|x| {
-                            x.map(|x| Term::Literal(Literal::new_typed_literal(x, dt.into_owned())))
-                        })
-                        .collect(),
-                },
-                RDFNodeType::None => {
-                    panic!()
-                }
-                RDFNodeType::MultiType => {
-                    let value_ser = ser
-                        .struct_()
-                        .unwrap()
-                        .field_by_name(MULTI_VALUE_COL)
-                        .unwrap()
-                        .cast(&DataType::Utf8)
-                        .unwrap();
-                    let value_vec: Vec<_> = value_ser.utf8().unwrap().par_iter().collect();
-                    let lang_ser = ser
-                        .struct_()
-                        .unwrap()
-                        .field_by_name(MULTI_LANG_COL)
-                        .unwrap()
-                        .cast(&DataType::Utf8)
-                        .unwrap();
-                    let lang_vec: Vec<_> = lang_ser.utf8().unwrap().par_iter().collect();
-                    let dt_ser = ser
-                        .struct_()
-                        .unwrap()
-                        .field_by_name(MULTI_DT_COL)
-                        .unwrap()
-                        .cast(&DataType::Utf8)
-                        .unwrap();
-                    let dt_vec: Vec<_> = dt_ser.utf8().unwrap().par_iter().collect();
-                    (0..df.height())
-                        .map(|i| {
-                            let value = value_vec.get(i).unwrap();
-                            let lang = lang_vec.get(i).unwrap();
-                            let dt = dt_vec.get(i).unwrap();
-                            if let Some(value) = *value {
-                                if let Some(lang) = *lang {
-                                    Some(Term::Literal(
-                                        Literal::new_language_tagged_literal_unchecked(value, lang),
-                                    ))
-                                } else if let Some(dt) = *dt {
-                                    match dt {
-                                        MULTI_IRI_DT => {
-                                            Some(Term::NamedNode(literal_iri_to_namednode(value)))
-                                        }
-                                        MULTI_BLANK_DT => {
-                                            Some(Term::BlankNode(literal_blanknode_to_blanknode(value)))
-                                        }
-                                        _ => Some(Term::Literal(Literal::new_typed_literal(
-                                            value,
-                                            literal_iri_to_namednode(dt),
-                                        ))),
-                                    }
-                                } else {
-                                    panic!()
+                    let mut final_terms = vec![];
+                    for _ in 0..height {
+                        let mut use_term = None;
+                        for iter in iters.iter_mut() {
+                            if let Some(term) = iter.next() {
+                                if let Some(term) = term {
+                                    use_term = Some(term);
                                 }
-                            } else {
-                                None
                             }
-                        })
-                        .collect()
+                        }
+                        final_terms.push(use_term);
+                    }
+                    final_terms
                 }
             };
             all_terms.push(terms);
         }
     }
     let mut solns = vec![];
-    for _i in 0..df.height() {
+    for _i in 0..height {
         let mut soln = vec![];
         for tl in &mut all_terms {
             soln.push(tl.pop().unwrap());
@@ -173,6 +111,84 @@ pub fn df_as_result(df: DataFrame, dtypes: &HashMap<String, RDFNodeType>) -> Que
     }
 }
 
+pub fn basic_rdf_node_type_series_to_term_vec(
+    ser: &Series,
+    base_rdfnode_type: &BaseRDFNodeType,
+) -> Vec<Option<Term>> {
+    match base_rdfnode_type {
+        BaseRDFNodeType::IRI => ser
+            .cast(&DataType::String)
+            .unwrap()
+            .str()
+            .unwrap()
+            .par_iter()
+            .map(|x| x.map(|x| Term::NamedNode(literal_iri_to_namednode(x))))
+            .collect(),
+        BaseRDFNodeType::BlankNode => ser
+            .cast(&DataType::String)
+            .unwrap()
+            .str()
+            .unwrap()
+            .par_iter()
+            .map(|x| x.map(|x| Term::BlankNode(literal_blanknode_to_blanknode(x))))
+            .collect(),
+        BaseRDFNodeType::Literal(l) => match l.as_ref() {
+            rdf::LANG_STRING => {
+                let value_ser = ser
+                    .struct_()
+                    .unwrap()
+                    .field_by_name(LANG_STRING_VALUE_FIELD)
+                    .unwrap();
+                let value_iter = value_ser.str().unwrap().into_iter();
+                let lang_ser = ser
+                    .struct_()
+                    .unwrap()
+                    .field_by_name(LANG_STRING_LANG_FIELD)
+                    .unwrap();
+                let lang_iter = lang_ser.str().unwrap().into_iter();
+                value_iter
+                    .zip(lang_iter)
+                    .map(|(value, lang)| {
+                        if let Some(value) = value {
+                            if let Some(lang) = lang {
+                                Some(Term::Literal(
+                                    Literal::new_language_tagged_literal_unchecked(value, lang),
+                                ))
+                            } else {
+                                panic!()
+                            }
+                        } else {
+                            None
+                        }
+                    })
+                    .collect()
+            }
+            xsd::STRING => ser
+                .cast(&DataType::String)
+                .unwrap()
+                .str()
+                .unwrap()
+                .par_iter()
+                .map(|x| x.map(|x| Term::Literal(Literal::new_simple_literal(x))))
+                .collect(),
+            dt => ser
+                .cast(&DataType::String)
+                .unwrap()
+                .str()
+                .unwrap()
+                .par_iter()
+                .map(|x| x.map(|x| Term::Literal(Literal::new_typed_literal(x, dt.into_owned()))))
+                .collect(),
+        },
+        BaseRDFNodeType::None => {
+            let mut v = vec![];
+            for _ in 0..ser.len() {
+                v.push(None);
+            }
+            v
+        }
+    }
+}
 
 pub fn primitive_polars_type_to_literal_type(data_type: &DataType) -> Option<NamedNodeRef> {
     match data_type {
@@ -187,12 +203,12 @@ pub fn primitive_polars_type_to_literal_type(data_type: &DataType) -> Option<Nam
         DataType::Int64 => Some(xsd::LONG),
         DataType::Float32 => Some(xsd::FLOAT),
         DataType::Float64 => Some(xsd::DOUBLE),
-        DataType::Utf8 => Some(xsd::STRING),
+        DataType::String => Some(xsd::STRING),
         DataType::Date => Some(xsd::DATE),
         DataType::Datetime(_, Some(_)) => Some(xsd::DATE_TIME_STAMP),
         DataType::Datetime(_, None) => Some(xsd::DATE_TIME),
         DataType::Duration(_) => Some(xsd::DURATION),
-        DataType::Categorical(_) => Some(xsd::STRING),
-        _ => {None}
+        DataType::Categorical(_, _) => Some(xsd::STRING),
+        _ => None,
     }
 }
