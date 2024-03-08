@@ -51,10 +51,14 @@ pub fn df_as_result(df: DataFrame, dtypes: &HashMap<String, RDFNodeType>) -> Que
                                     .unwrap()
                                     .field_by_name(LANG_STRING_VALUE_FIELD)
                                     .unwrap()
+                                    .cast(&DataType::String)
+                                    .unwrap()
                                     .clone(),
                                 ser.struct_()
                                     .unwrap()
                                     .field_by_name(LANG_STRING_LANG_FIELD)
+                                    .unwrap()
+                                    .cast(&DataType::String)
                                     .unwrap()
                                     .clone(),
                             ])

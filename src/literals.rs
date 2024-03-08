@@ -1,11 +1,11 @@
 use crate::{RepresentationError, LANG_STRING_LANG_FIELD, LANG_STRING_VALUE_FIELD};
-use chrono::{Datelike, DateTime, NaiveDate, NaiveDateTime, Utc};
+use chrono::{DateTime, Datelike, NaiveDate, NaiveDateTime, Utc};
+use log::warn;
 use oxrdf::vocab::{rdf, xsd};
 use oxrdf::{Literal, NamedNodeRef, Term};
 use polars_core::datatypes::TimeUnit;
 use polars_core::prelude::{AnyValue, DataType, Field};
 use std::str::FromStr;
-use log::warn;
 
 //This code is copied and modified from Chrontext, which has identical licensing
 pub fn sparql_literal_to_any_value<'a>(
@@ -73,9 +73,9 @@ pub fn sparql_literal_to_any_value<'a>(
                     AnyValue::Null
                 }
             }
-        } else if datatype == xsd::DATE{
+        } else if datatype == xsd::DATE {
             let parsed = NaiveDate::parse_from_str(value, "%Y-%m-%d").unwrap();
-            let dur = parsed.signed_duration_since(NaiveDate::from_ymd_opt(1970, 1,1).unwrap());
+            let dur = parsed.signed_duration_since(NaiveDate::from_ymd_opt(1970, 1, 1).unwrap());
             AnyValue::Date(dur.num_days() as i32)
         } else if datatype == rdf::LANG_STRING {
             //Not using StringOwned here causes corruption..

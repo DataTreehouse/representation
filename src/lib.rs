@@ -93,7 +93,10 @@ impl BaseRDFNodeType {
                 xsd::DOUBLE | xsd::DECIMAL => DataType::Float64,
                 xsd::FLOAT => DataType::Float32,
                 xsd::BOOLEAN => DataType::Boolean,
-                rdf::LANG_STRING => DataType::Struct(vec![Field::new(LANG_STRING_VALUE_FIELD, DataType::String), Field::new(LANG_STRING_LANG_FIELD, DataType::String)]),
+                rdf::LANG_STRING => DataType::Struct(vec![
+                    Field::new(LANG_STRING_VALUE_FIELD, DataType::String),
+                    Field::new(LANG_STRING_LANG_FIELD, DataType::String),
+                ]),
                 xsd::DATE_TIME => DataType::Datetime(TimeUnit::Nanoseconds, None),
                 n => {
                     todo!("Datatype {} not supported yet", n)
