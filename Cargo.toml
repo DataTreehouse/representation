@@ -6,6 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+log = {version = "0.4.21"}
 oxrdf = {version = "0.1.7", features = ["oxsdatatypes"]}
 polars = {version="0.37.0", features=["performant", "lazy", "dtype-full", "timezones", "polars-time", "partition_by", "cross_join"] }
 polars-core = "0.37.0"
