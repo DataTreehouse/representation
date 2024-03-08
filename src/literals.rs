@@ -6,6 +6,7 @@ use oxrdf::{Literal, NamedNodeRef, Term};
 use polars_core::datatypes::TimeUnit;
 use polars_core::prelude::{AnyValue, DataType, Field};
 use std::str::FromStr;
+use log::warn;
 
 //This code is copied and modified from Chrontext, which has identical licensing
 pub fn sparql_literal_to_any_value<'a>(
@@ -69,7 +70,8 @@ pub fn sparql_literal_to_any_value<'a>(
                         &None,
                     )
                 } else {
-                    panic!("Could not parse datetime: {}", value);
+                    warn!("Could not parse datetime: {}", value);
+                    AnyValue::Null
                 }
             }
         } else if datatype == xsd::DATE{
@@ -93,7 +95,7 @@ pub fn sparql_literal_to_any_value<'a>(
     } else {
         (AnyValue::StringOwned(value.into()), xsd::STRING)
     };
-    (anyv.into_static().unwrap(), dt)
+    (anyv, dt)
 }
 
 pub fn parse_literal_as_primitive<T: std::str::FromStr>(
