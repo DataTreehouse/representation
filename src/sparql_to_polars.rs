@@ -1,15 +1,27 @@
+use crate::{LANG_STRING_LANG_FIELD, LANG_STRING_VALUE_FIELD};
 use chrono::NaiveDate;
-use oxrdf::vocab::xsd;
+use oxrdf::vocab::{rdf, xsd};
 use oxrdf::{BlankNode, Literal, NamedNode, Term};
 use polars::export::chrono::{DateTime, NaiveDateTime, Utc};
-use polars::prelude::{LiteralValue, NamedFrom, Series, TimeUnit};
+use polars::prelude::{as_struct, lit, Expr, LiteralValue, NamedFrom, Series, TimeUnit};
 use std::str::FromStr;
+use polars_core::datatypes::AnyValue;
 
-pub fn sparql_term_to_polars_literal_value(term: &Term) -> polars::prelude::LiteralValue {
+pub fn sparql_term_to_polars_expr(term: &Term) -> Expr {
     match term {
-        Term::NamedNode(named_node) => sparql_named_node_to_polars_literal_value(named_node),
-        Term::Literal(lit) => sparql_literal_to_polars_literal_value(lit),
-        Term::BlankNode(bl) => sparql_blank_node_to_polars_literal_value(bl),
+        Term::NamedNode(named_node) => lit(sparql_named_node_to_polars_literal_value(named_node)),
+        Term::Literal(l) => {
+            let dt = l.datatype();
+            if dt == rdf::LANG_STRING {
+                as_struct(vec![
+                    lit(l.value()).alias(LANG_STRING_VALUE_FIELD),
+                    lit(l.language().unwrap()).alias(LANG_STRING_LANG_FIELD),
+                ])
+            } else {
+                lit(sparql_literal_to_polars_literal_value(l))
+            }
+        }
+        Term::BlankNode(bl) => lit(sparql_blank_node_to_polars_literal_value(bl)),
         _ => {
             panic!("Not supported")
         }
@@ -29,6 +41,8 @@ pub fn sparql_literal_to_polars_literal_value(lit: &Literal) -> LiteralValue {
     let value = lit.value();
     let literal_value = if datatype == xsd::STRING {
         LiteralValue::String(value.to_string())
+    } else if datatype == rdf::LANG_STRING {
+        panic!("Should never be called with lang string")
     } else if datatype == xsd::UNSIGNED_INT {
         let u = u32::from_str(value).expect("Integer parsing error");
         LiteralValue::UInt32(u)
@@ -67,20 +81,10 @@ pub fn sparql_literal_to_polars_literal_value(lit: &Literal) -> LiteralValue {
             }
         }
     } else if datatype == xsd::DATE {
-        let ymd_string: Vec<&str> = value.split('-').collect();
-        if ymd_string.len() != 3 {
-            todo!("Unsupported date format {}", value)
-        }
-        let y = i32::from_str(ymd_string.first().unwrap())
-            .unwrap_or_else(|_| panic!("Year parsing error {}", ymd_string.first().unwrap()));
-        let m = u32::from_str(ymd_string.get(1).unwrap())
-            .unwrap_or_else(|_| panic!("Month parsing error {}", ymd_string.get(1).unwrap()));
-        let d = u32::from_str(ymd_string.get(2).unwrap())
-            .unwrap_or_else(|_| panic!("Day parsing error {}", ymd_string.get(1).unwrap()));
-        let date = NaiveDate::from_ymd_opt(y, m, d).unwrap();
-        let dt = date.and_hms_opt(0, 0, 0).unwrap();
-
-        LiteralValue::DateTime(dt.timestamp(), TimeUnit::Milliseconds, None)
+        let parsed = NaiveDate::parse_from_str(value, "%Y-%m-%d").unwrap();
+        let dur = parsed.signed_duration_since(NaiveDate::from_ymd_opt(1970, 1, 1).unwrap());
+        let l = LiteralValue::Date(dur.num_days() as i32);
+        l
     } else if datatype == xsd::DECIMAL {
         let d = f64::from_str(value).expect("Decimal parsing error");
         LiteralValue::Float64(d)

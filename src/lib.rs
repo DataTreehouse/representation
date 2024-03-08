@@ -80,6 +80,15 @@ impl BaseRDFNodeType {
         }
     }
 
+    pub fn from_term(term: &Term) -> BaseRDFNodeType {
+        match term {
+            Term::NamedNode(_) => BaseRDFNodeType::IRI,
+            Term::BlankNode(_) => BaseRDFNodeType::BlankNode,
+            Term::Literal(l) => BaseRDFNodeType::Literal(l.datatype().into_owned()),
+            _ => todo!(),
+        }
+    }
+
     pub fn polars_data_type(&self) -> DataType {
         match self {
             BaseRDFNodeType::IRI => DataType::String,

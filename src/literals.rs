@@ -1,5 +1,5 @@
 use crate::{RepresentationError, LANG_STRING_LANG_FIELD, LANG_STRING_VALUE_FIELD};
-use chrono::{DateTime, Datelike, NaiveDate, NaiveDateTime, Utc};
+use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
 use log::warn;
 use oxrdf::vocab::{rdf, xsd};
 use oxrdf::{Literal, NamedNodeRef, Term};
