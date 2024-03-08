@@ -985,7 +985,7 @@ pub fn multi_columns_to_string_cols(
                                 + lit(l.to_string())
                         }
                     }
-                    BaseRDFNodeType::None => lit(LiteralValue::Null).cast(DataType::String),
+                    BaseRDFNodeType::None => lit(LiteralValue::Null).cast(t.polars_data_type()),
                 })
             }
             lf = lf.with_column(coalesce(to_coalesce.as_slice()).alias(c));

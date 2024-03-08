@@ -1,7 +1,6 @@
 use crate::{RepresentationError, LANG_STRING_LANG_FIELD, LANG_STRING_VALUE_FIELD};
 use chrono::{Datelike, DateTime, NaiveDate, NaiveDateTime, Utc};
-use oxrdf::vocab::rdf::LANG_STRING;
-use oxrdf::vocab::xsd;
+use oxrdf::vocab::{rdf, xsd};
 use oxrdf::{Literal, NamedNodeRef, Term};
 use polars_core::datatypes::TimeUnit;
 use polars_core::prelude::{AnyValue, DataType, Field};
@@ -78,7 +77,7 @@ pub fn sparql_literal_to_any_value<'a>(
             let parsed = NaiveDate::parse_from_str(value, "%Y-%m-%d").unwrap();
             let dur = parsed.signed_duration_since(NaiveDate::from_ymd_opt(1970, 1,1).unwrap());
             AnyValue::Date(dur.num_days() as i32)
-        } else if datatype == LANG_STRING {
+        } else if datatype == rdf::LANG_STRING {
             //Not using StringOwned here causes corruption..
             let val = AnyValue::StringOwned(value.into());
             let lang = AnyValue::StringOwned(language.unwrap().into());
