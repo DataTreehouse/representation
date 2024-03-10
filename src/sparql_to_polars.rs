@@ -5,6 +5,7 @@ use oxrdf::{BlankNode, Literal, NamedNode, Term};
 use polars::export::chrono::{DateTime, NaiveDateTime, Utc};
 use polars::prelude::{as_struct, lit, Expr, LiteralValue, NamedFrom, Series, TimeUnit};
 use std::str::FromStr;
+use log::warn;
 use polars_core::datatypes::AnyValue;
 
 pub fn sparql_term_to_polars_expr(term: &Term) -> Expr {
@@ -67,17 +68,18 @@ pub fn sparql_literal_to_polars_literal_value(lit: &Literal) -> LiteralValue {
     } else if datatype == xsd::DATE_TIME {
         let dt_without_tz = value.parse::<NaiveDateTime>();
         if let Ok(dt) = dt_without_tz {
-            LiteralValue::DateTime(dt.timestamp_nanos(), TimeUnit::Nanoseconds, None)
+            LiteralValue::DateTime(dt.timestamp_nanos_opt().unwrap(), TimeUnit::Nanoseconds, None)
         } else {
             let dt_without_tz = value.parse::<DateTime<Utc>>();
             if let Ok(dt) = dt_without_tz {
                 LiteralValue::DateTime(
-                    dt.naive_utc().timestamp_nanos(),
+                    dt.naive_utc().timestamp_nanos_opt().unwrap(),
                     TimeUnit::Nanoseconds,
                     None,
                 )
             } else {
-                panic!("Could not parse datetime: {}", value);
+                warn!("Could not parse datetime: {}", value);
+                LiteralValue::Null
             }
         }
     } else if datatype == xsd::DATE {
