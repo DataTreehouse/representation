@@ -182,13 +182,13 @@ pub fn lf_column_to_categorical(
     match rdf_node_types.get(c).unwrap() {
         RDFNodeType::IRI | RDFNodeType::BlankNode => {
             lf = lf.with_column(
-                col(c).cast(DataType::Categorical(None, CategoricalOrdering::Physical)),
+                col(c).cast(DataType::Categorical(None, CategoricalOrdering::Lexical)),
             )
         }
         RDFNodeType::Literal(l) => {
             if l.as_ref() == xsd::STRING {
                 lf = lf.with_column(
-                    col(c).cast(DataType::Categorical(None, CategoricalOrdering::Physical)),
+                    col(c).cast(DataType::Categorical(None, CategoricalOrdering::Lexical)),
                 )
             } else if l.as_ref() == rdf::LANG_STRING {
                 lf = lf.with_column(
@@ -196,11 +196,11 @@ pub fn lf_column_to_categorical(
                         col(c)
                             .struct_()
                             .field_by_name(LANG_STRING_VALUE_FIELD)
-                            .cast(DataType::Categorical(None, CategoricalOrdering::Physical)),
+                            .cast(DataType::Categorical(None, CategoricalOrdering::Lexical)),
                         col(c)
                             .struct_()
                             .field_by_name(LANG_STRING_LANG_FIELD)
-                            .cast(DataType::Categorical(None, CategoricalOrdering::Physical)),
+                            .cast(DataType::Categorical(None, CategoricalOrdering::Lexical)),
                     ])
                     .alias(c),
                 )
@@ -218,7 +218,7 @@ pub fn lf_column_to_categorical(
                             col(c)
                                 .struct_()
                                 .field_by_name(MULTI_IRI_DT)
-                                .cast(DataType::Categorical(None, CategoricalOrdering::Physical)),
+                                .cast(DataType::Categorical(None, CategoricalOrdering::Lexical)),
                         )
                     }
                     BaseRDFNodeType::BlankNode => {
@@ -227,7 +227,7 @@ pub fn lf_column_to_categorical(
                             col(c)
                                 .struct_()
                                 .field_by_name(MULTI_BLANK_DT)
-                                .cast(DataType::Categorical(None, CategoricalOrdering::Physical)),
+                                .cast(DataType::Categorical(None, CategoricalOrdering::Lexical)),
                         )
                     }
                     BaseRDFNodeType::Literal(l) => {
@@ -239,7 +239,7 @@ pub fn lf_column_to_categorical(
                                     .field_by_name(&non_multi_type_string(t))
                                     .cast(DataType::Categorical(
                                         None,
-                                        CategoricalOrdering::Physical,
+                                        CategoricalOrdering::Lexical,
                                     )),
                             );
                         } else if l.as_ref() == rdf::LANG_STRING {
@@ -250,12 +250,12 @@ pub fn lf_column_to_categorical(
                                     .field_by_name(LANG_STRING_VALUE_FIELD)
                                     .cast(DataType::Categorical(
                                         None,
-                                        CategoricalOrdering::Physical,
+                                        CategoricalOrdering::Lexical,
                                     )),
                             );
                             fields.push(
                                 col(c).struct_().field_by_name(LANG_STRING_LANG_FIELD).cast(
-                                    DataType::Categorical(None, CategoricalOrdering::Physical),
+                                    DataType::Categorical(None, CategoricalOrdering::Lexical),
                                 ),
                             );
                         } else {

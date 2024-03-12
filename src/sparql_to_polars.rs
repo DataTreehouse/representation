@@ -91,7 +91,7 @@ pub fn sparql_literal_to_polars_literal_value(lit: &Literal) -> LiteralValue {
         let d = f64::from_str(value).expect("Decimal parsing error");
         LiteralValue::Float64(d)
     } else {
-        todo!("Not implemented! {:?}", datatype)
+        LiteralValue::String(value.to_string())
     };
     literal_value
 }

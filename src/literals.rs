@@ -6,6 +6,7 @@ use oxrdf::{Literal, NamedNodeRef, Term};
 use polars_core::datatypes::TimeUnit;
 use polars_core::prelude::{AnyValue, DataType, Field};
 use std::str::FromStr;
+use polars::prelude::SearchSortedSide::Any;
 
 //This code is copied and modified from Chrontext, which has identical licensing
 pub fn sparql_literal_to_any_value<'a>(
@@ -88,7 +89,7 @@ pub fn sparql_literal_to_any_value<'a>(
             let av = AnyValue::StructOwned(Box::new((vec![val, lang], polars_fields)));
             av
         } else {
-            todo!("Not implemented! {:?}", datatype)
+            AnyValue::StringOwned(value.into())
         };
         (literal_value, datatype)
     } else {
